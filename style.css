@@ -10,10 +10,17 @@ h1{font-size:18px;margin:0 0 3px;font-weight:800}
 .score b{font-size:16px;margin-left:4px}
 .game-wrap{position:relative;flex:1;min-height:0}
 canvas{display:block;width:100%;height:100%;background:linear-gradient(#fbf8f2,#f1e8dc)}
+.rotate-controls{position:absolute;left:50%;bottom:18px;transform:translateX(-50%);display:flex;align-items:center;gap:8px;z-index:3;padding:6px 8px;border-radius:18px;background:rgba(255,250,242,.88);box-shadow:0 3px 12px rgba(0,0,0,.10);backdrop-filter:blur(4px)}
+.rotate-controls button{width:44px;height:44px;padding:0;border-radius:50%;font-size:28px;line-height:1}
+.rotate-controls span{font-size:11px;color:#756d63;min-width:28px;text-align:center}
 footer{height:48px;display:flex;align-items:center;justify-content:space-between;gap:10px;padding:7px 12px;background:#fffaf2;border-top:1px solid #ded5c8;font-size:11px;color:#756d63}
 button{border:0;border-radius:10px;padding:8px 12px;background:#29251f;color:#fff;font-weight:700}
-.overlay{position:absolute;inset:0;display:grid;place-items:center;background:rgba(40,35,28,.28)}
+.overlay{position:absolute;inset:0;display:grid;place-items:center;background:rgba(40,35,28,.28);z-index:5}
 .hidden{display:none}
 .panel{width:min(86%,340px);padding:24px;background:#fffaf2;border-radius:18px;text-align:center;box-shadow:0 12px 40px rgba(0,0,0,.18)}
 .panel h2{margin:0 0 8px}.panel p{margin:0 0 18px;color:#6e655a}
-@media(min-width:700px){h1{font-size:20px}.topbar{height:82px}}
+@media(min-width:700px){
+  h1{font-size:20px}
+  .topbar{height:82px}
+  .rotate-controls{bottom:22px}
+}
