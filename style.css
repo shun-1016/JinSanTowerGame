@@ -1,0 +1,19 @@
+*{box-sizing:border-box}
+html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#f4efe6;color:#29251f;font-family:-apple-system,BlinkMacSystemFont,"Hiragino Kaku Gothic ProN","Yu Gothic",sans-serif}
+body{touch-action:none}
+.app{height:100%;display:flex;flex-direction:column;max-width:900px;margin:auto}
+.topbar{height:74px;display:flex;align-items:center;justify-content:space-between;padding:10px 16px;background:#fffaf2;border-bottom:1px solid #ded5c8;z-index:2}
+h1{font-size:18px;margin:0 0 3px;font-weight:800}
+#status{font-size:13px;margin:0;color:#746b60}
+.score{display:flex;gap:12px;font-size:13px}
+.score span{background:#eee6da;border-radius:12px;padding:7px 10px}
+.score b{font-size:16px;margin-left:4px}
+.game-wrap{position:relative;flex:1;min-height:0}
+canvas{display:block;width:100%;height:100%;background:linear-gradient(#fbf8f2,#f1e8dc)}
+footer{height:48px;display:flex;align-items:center;justify-content:space-between;gap:10px;padding:7px 12px;background:#fffaf2;border-top:1px solid #ded5c8;font-size:11px;color:#756d63}
+button{border:0;border-radius:10px;padding:8px 12px;background:#29251f;color:#fff;font-weight:700}
+.overlay{position:absolute;inset:0;display:grid;place-items:center;background:rgba(40,35,28,.28)}
+.hidden{display:none}
+.panel{width:min(86%,340px);padding:24px;background:#fffaf2;border-radius:18px;text-align:center;box-shadow:0 12px 40px rgba(0,0,0,.18)}
+.panel h2{margin:0 0 8px}.panel p{margin:0 0 18px;color:#6e655a}
+@media(min-width:700px){h1{font-size:20px}.topbar{height:82px}}
