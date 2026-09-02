@@ -227,12 +227,15 @@ function resolveCurrentAgainstPlaced(current,placed){
   // placedがcurrentを支えている接触（法線が下向き＝currentから見てplacedが下）
   if(ny>0.35 && current.vy>0){
     current.vy=0;
-    // 支持物の中心から横にずれて着地した場合、接触反力による回転を近似。
-    const offset=Math.max(-1,Math.min(1,(current.x-placed.x)/Math.max(1,(current.w+placed.w)*0.5)));
-    current.va += offset * 3.0;
-    current.va=Math.max(-4.0,Math.min(4.0,current.va));
+    // 接触した瞬間だけ、着地点の偏りに応じて回転の勢いを与える。
+    // 毎フレーム加算すると、土台の上で永久に回転するためここでは
+    // 既に支持状態ならトルクを追加しない。
+    if(!current.contactImpulseApplied){
+      const offset=Math.max(-1,Math.min(1,(current.x-placed.x)/Math.max(1,(current.w+placed.w)*0.5)));
+      current.va += offset * 1.35;
+      current.va=Math.max(-2.2,Math.min(2.2,current.va));
+    }
     current.vx*=0.92;
-    current.va*=0.90;
     current.supported=true;
   }else if(vn>0){
     // 横からぶつかった場合は、法線方向の速度だけ反射。
@@ -270,12 +273,14 @@ function resolveGround(current){
   if(current.vy>0) current.vy*=-BOUNCE;
   current.vy*=0.65;
 
-  // 接触点が中心からずれているほど、着地時に回転する。
-  // 「落下時の角度のまま固定」にならないよう、接触位置を近似してトルクを与える。
-  const halfW=Math.max(1,current.w/2);
-  const normalized=Math.max(-1,Math.min(1,(current.x-W/2)/halfW));
-  current.va += normalized * 2.6;
-  current.va=Math.max(-3.5,Math.min(3.5,current.va));
+  // 地面に初めて接触した瞬間だけ、接触位置の偏りに応じて回転を与える。
+  // 接触中の毎フレーム加算は永久回転の原因になるため行わない。
+  if(!current.contactImpulseApplied){
+    const halfW=Math.max(1,current.w/2);
+    const normalized=Math.max(-1,Math.min(1,(current.x-W/2)/halfW));
+    current.va += normalized * 1.15;
+    current.va=Math.max(-2.0,Math.min(2.0,current.va));
+  }
   return true;
 }
 
@@ -302,7 +307,9 @@ function update(dt){
   const now=performance.now();
 
   if(current && current.falling){
+    const wasSupported=current.supported===true;
     current.supported=false;
+    current.contactImpulseApplied=wasSupported;
     current.vy+=GRAVITY*dt;
     current.vx*=Math.pow(AIR,dt*60);
     current.vy*=Math.pow(AIR,dt*20);
@@ -347,16 +354,21 @@ function update(dt){
       current.settle=0;
     }
 
+    // 接触中は角速度を徐々に減衰させ、最終的に静止させる。
+    if(current.supported){
+      current.va*=Math.pow(0.72,dt*60);
+    }
+
     // 接触直後の微小な振動を吸収。
     if(current.supported && current.settle>0.12){
       current.vy=0;
       if(Math.abs(current.vx)<7) current.vx=0;
-      if(Math.abs(current.va)<0.35) current.va=0;
+      if(Math.abs(current.va)<0.45) current.va=0;
     }
 
     // 「乗っている」ことを確認してから固定する。
     if(current.supported && current.settle>0.24 &&
-       Math.abs(current.vy)<8 && Math.abs(current.va)<0.45){
+       Math.abs(current.vy)<8 && Math.abs(current.va)<0.55){
       pieces.push(current);
       current=null;
       updateCamera();
