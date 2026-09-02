@@ -214,11 +214,11 @@ function resolveCurrentAgainstPlaced(current,placed){
   const nx=hit.ax.x, ny=hit.ax.y;
   const depth=hit.depth;
 
-  current.x += nx*depth;
-  current.y += ny*depth;
+  current.x -= nx*depth;
+  current.y -= ny*depth;
 
   const vn=current.vx*nx+current.vy*ny;
-  if(vn<0){
+  if(vn>0){
     current.vx -= vn*nx*(1+BOUNCE);
     current.vy -= vn*ny*(1+BOUNCE);
   }
