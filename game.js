@@ -211,24 +211,33 @@ function resolveCurrentAgainstPlaced(current,placed){
   const hit=sat(current,placed);
   if(!hit) return false;
 
-  const nx=hit.ax.x, ny=hit.ax.y;
-  const depth=hit.depth;
+  let nx=hit.ax.x, ny=hit.ax.y;
+  const depth=Math.min(hit.depth, 28); // 1フレームでの異常なワープを防ぐ
 
+  // SATの法線は「current → placed」方向。
+  // placedが下にある場合、currentを上へ押し戻す。
   current.x -= nx*depth;
   current.y -= ny*depth;
 
   const vn=current.vx*nx+current.vy*ny;
-  if(vn>0){
+
+  // placedがcurrentを支えている接触（法線が下向き＝currentから見てplacedが下）
+  if(ny>0.35 && current.vy>0){
+    current.vy=0;
+    // 接触面に沿って横方向だけ残す。回転も急激に増えないよう抑える。
+    current.vx*=0.92;
+    current.va*=0.55;
+    current.supported=true;
+  }else if(vn>0){
+    // 横からぶつかった場合は、法線方向の速度だけ反射。
     current.vx -= vn*nx*(1+BOUNCE);
     current.vy -= vn*ny*(1+BOUNCE);
+    current.vx*=0.92;
+    current.vy*=0.92;
+    current.va*=0.78;
   }
-
-  current.vx*=FRICTION;
-  current.vy*=FRICTION;
-  current.va*=0.82;
   return true;
 }
-
 function keepCurrentInside(current){
   const pts=rectCorners(current);
   const xs=pts.map(p=>p.x);
@@ -263,6 +272,7 @@ function update(dt){
   const now=performance.now();
 
   if(current && current.falling){
+    current.supported=false;
     current.vy+=GRAVITY*dt;
     current.vx*=Math.pow(AIR,dt*60);
     current.vy*=Math.pow(AIR,dt*20);
@@ -270,24 +280,53 @@ function update(dt){
     current.y+=current.vy*dt;
     current.a+=current.va*dt;
 
+    // まず画面外への飛び出しを防ぐ。
     keepCurrentInside(current);
-    resolveGround(current);
 
-    // 複数のピースと接触しても、配置済み側は絶対に動かさない
     let touched=false;
-    for(const p of pieces){
-      if(resolveCurrentAgainstPlaced(current,p)) touched=true;
+
+    // 1フレーム中に複数回押し戻す。複数ピースの境界に入った際の
+    // 「一気に横へ飛ぶ」「画面外へ飛ぶ」を防ぐため、最も深い接触から処理。
+    for(let i=0;i<6;i++){
+      let best=null;
+      for(const p of pieces){
+        const hit=sat(current,p);
+        if(hit && (!best || hit.depth>best.hit.depth)) best={p,hit};
+      }
+      if(!best) break;
+
+      // 一度だけ実際の押し戻し処理を行う。
+      resolveCurrentAgainstPlaced(current,best.p);
+      touched=true;
+      keepCurrentInside(current);
     }
 
-    if(touched && Math.abs(current.vy)<REST_VEL && Math.abs(current.va)<0.9){
+    const groundHit=resolveGround(current);
+    if(groundHit){
+      touched=true;
+      current.supported=true;
       current.vy=0;
-      current.va=0;
+      current.va*=0.8;
     }
 
-    current.settle=(current.settle||0)+dt;
+    // 支えられている時だけ静止判定を進める。
+    // 空中にいる時間だけで固定されることはない。
+    if(current.supported && Math.abs(current.vy)<REST_VEL){
+      current.settle=(current.settle||0)+dt;
+    }else{
+      current.settle=0;
+    }
 
-    // 地面または他ピースに乗っていて、十分静止したら固定
-    if(current.settle>0.28 && Math.abs(current.vy)<22){
+    // 接触直後の微小な振動を吸収。
+    if(current.supported && current.settle>0.12){
+      current.vy=0;
+      if(Math.abs(current.vx)<7) current.vx=0;
+      if(Math.abs(current.va)<0.35) current.va=0;
+    }
+
+    // 「乗っている」ことを確認してから固定する。
+    if(current.supported && current.settle>0.24 &&
+       Math.abs(current.vy)<8 && Math.abs(current.va)<0.45){
       pieces.push(current);
       current=null;
       scores[player]++;
@@ -301,7 +340,6 @@ function update(dt){
     spawn();
   }
 }
-
 function drawPiece(p){
   ctx.save();
   ctx.translate(p.x,p.y);
