@@ -27,7 +27,7 @@ const REST_VEL = 18;
 const TURN_DELAY = 450;
 const ROTATE_STEP = Math.PI / 12; // 15 degrees
 
-let W=0,H=0,dpr=1,groundY=0;
+let W=0,H=0,dpr=1,groundY=0,groundWorldY=0,cameraY=0;
 let pieces=[], queue=[], current=null, player=0;
 let scores=[0,0], gameEnded=false, acceptingInput=false;
 let pointerId=null, dragging=false;
@@ -50,7 +50,8 @@ function resize(){
   canvas.width=Math.round(W*dpr);
   canvas.height=Math.round(H*dpr);
   ctx.setTransform(dpr,0,0,dpr,0,0);
-  groundY=H-18;
+  groundWorldY=H-18;
+  groundY=groundWorldY-cameraY;
 }
 addEventListener("resize",resize);
 
@@ -107,7 +108,7 @@ function spawn(){
     im:src,
     processed:null,
     x:W/2,
-    y:Math.max(70,d.h/2+8),
+    y:cameraY+Math.max(70,d.h/2+8),
     w:d.w,
     h:d.h,
     a:0,
@@ -126,6 +127,8 @@ function spawn(){
 
 function reset(){
   pieces=[];
+  cameraY=0;
+  groundY=groundWorldY;
   scores=[0,0];
   player=0;
   gameEnded=false;
@@ -224,9 +227,12 @@ function resolveCurrentAgainstPlaced(current,placed){
   // placedがcurrentを支えている接触（法線が下向き＝currentから見てplacedが下）
   if(ny>0.35 && current.vy>0){
     current.vy=0;
-    // 接触面に沿って横方向だけ残す。回転も急激に増えないよう抑える。
+    // 支持物の中心から横にずれて着地した場合、接触反力による回転を近似。
+    const offset=Math.max(-1,Math.min(1,(current.x-placed.x)/Math.max(1,(current.w+placed.w)*0.5)));
+    current.va += offset * 3.0;
+    current.va=Math.max(-4.0,Math.min(4.0,current.va));
     current.vx*=0.92;
-    current.va*=0.55;
+    current.va*=0.90;
     current.supported=true;
   }else if(vn>0){
     // 横からぶつかった場合は、法線方向の速度だけ反射。
@@ -258,13 +264,37 @@ function keepCurrentInside(current){
 function resolveGround(current){
   const pts=rectCorners(current);
   const maxY=Math.max(...pts.map(p=>p.y));
-  if(maxY<=groundY) return false;
+  if(maxY<=groundWorldY) return false;
 
-  current.y-=maxY-groundY;
+  current.y-=maxY-groundWorldY;
   if(current.vy>0) current.vy*=-BOUNCE;
   current.vy*=0.65;
-  current.va*=0.78;
+
+  // 接触点が中心からずれているほど、着地時に回転する。
+  // 「落下時の角度のまま固定」にならないよう、接触位置を近似してトルクを与える。
+  const halfW=Math.max(1,current.w/2);
+  const normalized=Math.max(-1,Math.min(1,(current.x-W/2)/halfW));
+  current.va += normalized * 2.6;
+  current.va=Math.max(-3.5,Math.min(3.5,current.va));
   return true;
+}
+
+function updateCamera(){
+  if(!pieces.length) {
+    groundY=groundWorldY-cameraY;
+    return;
+  }
+
+  // タワー最上部が画面上部に近づいたら、カメラを上へ追従させる。
+  const top=Math.min(...pieces.map(p => Math.min(...rectCorners(p).map(v=>v.y))));
+  const targetScreenTop=Math.max(150,H*0.28);
+  // world座標のYは下方向が正。タワーの頂点が画面上部へ近づいたら、
+  // カメラを「上方向（負のY）」へ動かして、タワー全体を画面内に戻す。
+  const desiredCamera=top-targetScreenTop;
+  if(desiredCamera<cameraY){
+    cameraY=desiredCamera;
+  }
+  groundY=groundWorldY-cameraY;
 }
 
 function update(dt){
@@ -329,6 +359,7 @@ function update(dt){
        Math.abs(current.vy)<8 && Math.abs(current.va)<0.45){
       pieces.push(current);
       current=null;
+      updateCamera();
       scores[player]++;
       p1El.textContent=scores[0];
       p2El.textContent=scores[1];
@@ -342,7 +373,7 @@ function update(dt){
 }
 function drawPiece(p){
   ctx.save();
-  ctx.translate(p.x,p.y);
+  ctx.translate(p.x,p.y-cameraY);
   ctx.rotate(p.a);
 
   if(p.processed){
