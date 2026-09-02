@@ -1,41 +1,47 @@
 <!doctype html>
 <html lang="ja">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
-  <meta name="theme-color" content="#f4efe6">
-  <title>ベビータワーバトル</title>
-  <link rel="stylesheet" href="style.css">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+<title>ベビータワーバトル</title>
+<link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <main class="app">
-    <header class="topbar">
-      <div>
-        <h1>ベビータワーバトル</h1>
-        <p id="status">プレイヤー1の番</p>
-      </div>
-      <div class="score">
-        <span>P1 <b id="p1">0</b></span>
-        <span>P2 <b id="p2">0</b></span>
-      </div>
-    </header>
+<div class="app">
+  <header class="topbar">
+    <div>
+      <h1>ベビータワーバトル</h1>
+      <p id="status">読み込み中…</p>
+    </div>
+    <div class="score">
+      <span>P1 <b id="p1">0</b></span>
+      <span>P2 <b id="p2">0</b></span>
+    </div>
+  </header>
 
-    <section class="game-wrap">
-      <canvas id="game"></canvas>
-      <div id="gameover" class="overlay hidden">
-        <div class="panel">
-          <h2 id="result">ゲームオーバー</h2>
-          <p id="resultDetail"></p>
-          <button id="restart">もう一度遊ぶ</button>
-        </div>
-      </div>
-    </section>
+  <main class="game-wrap">
+    <canvas id="game"></canvas>
+    <div class="rotate-controls" aria-label="回転操作">
+      <button id="rotateLeft" type="button" aria-label="左に回転">↺</button>
+      <span>回転</span>
+      <button id="rotateRight" type="button" aria-label="右に回転">↻</button>
+    </div>
 
-    <footer>
-      <span>ドラッグして位置を決める → 指を離して落とす</span>
-      <button id="reset">リセット</button>
-    </footer>
+    <div id="gameover" class="overlay hidden">
+      <div class="panel">
+        <h2>ゲーム終了</h2>
+        <p id="result"></p>
+        <p id="resultDetail"></p>
+        <button id="restart" type="button">もう一度</button>
+      </div>
+    </div>
   </main>
-  <script src="game.js"></script>
+
+  <footer>
+    <span>ピースを左右に動かして、タップを離すと落下します。↺↻で回転。</span>
+    <button id="reset" type="button">リセット</button>
+  </footer>
+</div>
+<script src="game.js"></script>
 </body>
 </html>

@@ -90,9 +90,9 @@ function makeTransparent(im){
     }
   }
   x.putImageData(data,0,0);
-  const out=new Image();
-  out.src=c.toDataURL("image/png");
-  return {im:out,w:d.w,h:d.h};
+  // Canvas自体を描画元にする。Imageに変換すると非同期読み込み待ちが
+  // 必要になり、初回表示時にピースが描画されないことがある。
+  return {im:c,w:d.w,h:d.h};
 }
 
 function spawn(){
