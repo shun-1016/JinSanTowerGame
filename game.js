@@ -21,11 +21,15 @@ const ASSETS = Array.from({length:21},(_,i) =>
 const MAX_PIECE = 150;
 const GRAVITY = 1250;
 const AIR = 0.996;
-const BOUNCE = 0.08;
-const FRICTION = 0.86;
-const REST_VEL = 18;
+const BOUNCE = 0.035;
+const LINEAR_FRICTION = 0.82;
+const ANGULAR_DAMPING = 0.88;
+const REST_VEL = 22;
+const REST_ANGULAR = 0.22;
+const SETTLE_TIME = 0.28;
 const TURN_DELAY = 450;
-const ROTATE_STEP = Math.PI / 12; // 15 degrees
+const ROTATE_STEP = Math.PI / 12;
+const TORQUE_SCALE = 0.00085;
 
 let W=0,H=0,dpr=1,groundY=0,groundWorldY=0,cameraY=0;
 let pieces=[], queue=[], current=null, player=0;
@@ -68,10 +72,6 @@ function dimensions(im){
   return {w:im.naturalWidth*scale,h:im.naturalHeight*scale};
 }
 
-/*
- * JPEGに残っている白背景を透明化する。
- * ほぼ白いピクセルだけを透明にするので、通常の肌色や衣服は残す。
- */
 function makeTransparent(im){
   const d=dimensions(im);
   const c=document.createElement("canvas");
@@ -83,16 +83,10 @@ function makeTransparent(im){
   for(let i=0;i<data.data.length;i+=4){
     const r=data.data[i], g=data.data[i+1], b=data.data[i+2];
     const min=Math.min(r,g,b), max=Math.max(r,g,b);
-    // 白〜薄いグレーの背景だけ透明化
-    if(min>238 && max-min<12){
-      data.data[i+3]=0;
-    }else if(min>225 && max-min<14){
-      data.data[i+3]=Math.round((238-min)/13*255);
-    }
+    if(min>238 && max-min<12) data.data[i+3]=0;
+    else if(min>225 && max-min<14) data.data[i+3]=Math.round((238-min)/13*255);
   }
   x.putImageData(data,0,0);
-  // Canvas自体を描画元にする。Imageに変換すると非同期読み込み待ちが
-  // 必要になり、初回表示時にピースが描画されないことがある。
   return {im:c,w:d.w,h:d.h};
 }
 
@@ -100,51 +94,29 @@ function spawn(){
   if(!queue.length) shuffle();
   const id=queue.shift();
   if(id===undefined){ endGame("使用できる画像がありません"); return; }
-
-  const src=images[id];
-  const d=dimensions(src);
+  const src=images[id], d=dimensions(src);
   current={
-    id,
-    im:src,
-    processed:null,
-    x:W/2,
-    y:cameraY+Math.max(70,d.h/2+8),
-    w:d.w,
-    h:d.h,
-    a:0,
-    vx:0,
-    vy:0,
-    va:0,
-    falling:false,
-    settle:0
+    id, im:src, processed:makeTransparent(src),
+    x:W/2, y:cameraY+Math.max(70,d.h/2+8), w:d.w, h:d.h,
+    a:0, vx:0, vy:0, va:0,
+    falling:false, settle:0, supported:false,
+    contactKey:null, contactTime:0
   };
-
-  // 表示用画像を事前に透明化
-  current.processed=makeTransparent(src);
   acceptingInput=true;
   statusEl.textContent=`プレイヤー${player+1}の番`;
 }
 
 function reset(){
-  pieces=[];
-  cameraY=0;
-  groundY=groundWorldY;
-  scores=[0,0];
-  player=0;
-  gameEnded=false;
+  pieces=[]; cameraY=0; groundY=groundWorldY;
+  scores=[0,0]; player=0; gameEnded=false;
   overlay.classList.add("hidden");
-  p1El.textContent="0";
-  p2El.textContent="0";
-  shuffle();
-  spawn();
+  p1El.textContent="0"; p2El.textContent="0";
+  shuffle(); spawn();
 }
 
 function endGame(reason){
-  gameEnded=true;
-  acceptingInput=false;
-  current=null;
-  const winner=scores[0]===scores[1] ? "引き分け" :
-    scores[0]>scores[1] ? "プレイヤー1" : "プレイヤー2";
+  gameEnded=true; acceptingInput=false; current=null;
+  const winner=scores[0]===scores[1] ? "引き分け" : scores[0]>scores[1] ? "プレイヤー1" : "プレイヤー2";
   resultEl.textContent=winner;
   resultDetail.textContent=reason||"タワーが崩れました";
   overlay.classList.remove("hidden");
@@ -177,128 +149,99 @@ function axes(poly){
 
 function project(poly,ax){
   let mn=Infinity,mx=-Infinity;
-  for(const p of poly){
-    const v=p.x*ax.x+p.y*ax.y;
-    mn=Math.min(mn,v); mx=Math.max(mx,v);
-  }
+  for(const p of poly){const v=p.x*ax.x+p.y*ax.y;mn=Math.min(mn,v);mx=Math.max(mx,v);}
   return [mn,mx];
 }
 
 function sat(a,b){
-  const pa=rectCorners(a),pb=rectCorners(b);
-  const axs=axes(pa).concat(axes(pb));
+  const pa=rectCorners(a),pb=rectCorners(b),axs=axes(pa).concat(axes(pb));
   let best=null;
-
   for(const ax of axs){
     const [a1,a2]=project(pa,ax),[b1,b2]=project(pb,ax);
     const ov=Math.min(a2,b2)-Math.max(a1,b1);
     if(ov<=0) return null;
-    if(!best || ov<best.depth) best={depth:ov,ax:{x:ax.x,y:ax.y}};
+    if(!best||ov<best.depth) best={depth:ov,ax:{x:ax.x,y:ax.y}};
   }
-
   const dir={x:b.x-a.x,y:b.y-a.y};
-  if(dir.x*best.ax.x+dir.y*best.ax.y<0){
-    best.ax.x*=-1; best.ax.y*=-1;
-  }
+  if(dir.x*best.ax.x+dir.y*best.ax.y<0){best.ax.x*=-1;best.ax.y*=-1;}
   return best;
 }
 
-/*
- * 配置済みピースは「土台」として固定する。
- * 以前はb側も押し動かしていたため、2個目以降を落とすと
- * 1個目が沈む問題が発生していた。
- *
- * 今回は落下中のcurrentだけを押し戻す。
- */
-function resolveCurrentAgainstPlaced(current,placed){
-  const hit=sat(current,placed);
-  if(!hit) return false;
-
-  let nx=hit.ax.x, ny=hit.ax.y;
-  const depth=Math.min(hit.depth, 28); // 1フレームでの異常なワープを防ぐ
-
-  // SATの法線は「current → placed」方向。
-  // placedが下にある場合、currentを上へ押し戻す。
-  current.x -= nx*depth;
-  current.y -= ny*depth;
-
-  const vn=current.vx*nx+current.vy*ny;
-
-  // placedがcurrentを支えている接触（法線が下向き＝currentから見てplacedが下）
-  if(ny>0.35 && current.vy>0){
-    current.vy=0;
-    // 接触した瞬間だけ、着地点の偏りに応じて回転の勢いを与える。
-    // 毎フレーム加算すると、土台の上で永久に回転するためここでは
-    // 既に支持状態ならトルクを追加しない。
-    if(!current.contactImpulseApplied){
-      const offset=Math.max(-1,Math.min(1,(current.x-placed.x)/Math.max(1,(current.w+placed.w)*0.5)));
-      current.va += offset * 1.35;
-      current.va=Math.max(-2.2,Math.min(2.2,current.va));
-    }
-    current.vx*=0.92;
-    current.supported=true;
-  }else if(vn>0){
-    // 横からぶつかった場合は、法線方向の速度だけ反射。
-    current.vx -= vn*nx*(1+BOUNCE);
-    current.vy -= vn*ny*(1+BOUNCE);
-    current.vx*=0.92;
-    current.vy*=0.92;
-    current.va*=0.78;
-  }
-  return true;
-}
-function keepCurrentInside(current){
-  const pts=rectCorners(current);
-  const xs=pts.map(p=>p.x);
-  const minX=Math.min(...xs),maxX=Math.max(...xs);
-
-  if(minX<0){
-    current.x-=minX;
-    current.vx*=-0.18;
-    current.va*=-0.35;
-  }
-  if(maxX>W){
-    current.x-=maxX-W;
-    current.vx*=-0.18;
-    current.va*=-0.35;
-  }
+function supportPoint(p, normal){
+  const pts=rectCorners(p);
+  let best=-Infinity;
+  const vals=pts.map(v=>v.x*normal.x+v.y*normal.y);
+  for(const v of vals) best=Math.max(best,v);
+  const near=[];
+  for(let i=0;i<pts.length;i++) if(best-vals[i]<Math.max(2,p.w*0.035)) near.push(pts[i]);
+  if(!near.length) return pts[vals.indexOf(best)];
+  return near.reduce((a,b)=>({x:a.x+b.x,y:a.y+b.y}),{x:0,y:0});
 }
 
-function resolveGround(current){
-  const pts=rectCorners(current);
-  const maxY=Math.max(...pts.map(p=>p.y));
-  if(maxY<=groundWorldY) return false;
+function addSupportTorque(p, contactPoint, normal, dt){
+  // 重力を接触点まわりのトルクとして扱う。
+  // 座標系はY下向きなので、contactPoint.x-p.x がそのまま回転方向になる。
+  const rx=contactPoint.x-p.x;
+  const lever=Math.max(-p.w,Math.min(p.w,rx));
+  const inertia=Math.max(1,(p.w*p.w+p.h*p.h)/12);
+  const torque=lever*GRAVITY*TORQUE_SCALE;
+  p.va += (torque/inertia)*dt;
 
-  current.y-=maxY-groundWorldY;
-  if(current.vy>0) current.vy*=-BOUNCE;
-  current.vy*=0.65;
+  // 接触面の摩擦。横滑りが大きいほど角速度も少し抑える。
+  const tangent={x:-normal.y,y:normal.x};
+  const vt=p.vx*tangent.x+p.vy*tangent.y;
+  p.vx -= vt*tangent.x*Math.min(1,5*dt);
+  p.vy -= vt*tangent.y*Math.min(1,5*dt);
+}
 
-  // 地面に初めて接触した瞬間だけ、接触位置の偏りに応じて回転を与える。
-  // 接触中の毎フレーム加算は永久回転の原因になるため行わない。
-  if(!current.contactImpulseApplied){
-    const halfW=Math.max(1,current.w/2);
-    const normalized=Math.max(-1,Math.min(1,(current.x-W/2)/halfW));
-    current.va += normalized * 1.15;
-    current.va=Math.max(-2.0,Math.min(2.0,current.va));
+function resolveSupportCollision(p,placed,hit){
+  const nx=hit.ax.x,ny=hit.ax.y;
+  const depth=Math.min(hit.depth,16);
+  p.x-=nx*depth;
+  p.y-=ny*depth;
+
+  const vn=p.vx*nx+p.vy*ny;
+  if(vn>0){
+    p.vx-=vn*nx*(1+BOUNCE);
+    p.vy-=vn*ny*(1+BOUNCE);
   }
-  return true;
+
+  const cp=supportPoint(p,{x:nx,y:ny});
+  addSupportTorque(p,cp,{x:nx,y:ny},1/60);
+  p.vx*=LINEAR_FRICTION;
+  p.va*=ANGULAR_DAMPING;
+  return {nx,ny,cp};
+}
+
+function resolveGround(p){
+  const pts=rectCorners(p), maxY=Math.max(...pts.map(v=>v.y));
+  if(maxY<=groundWorldY) return null;
+  p.y-=maxY-groundWorldY;
+  if(p.vy>0) p.vy*=-BOUNCE;
+  p.vy*=0.5;
+
+  // 地面の最上面を支持面として扱う。
+  const bottom=pts.filter(v=>Math.abs(v.y-maxY)<Math.max(2,p.w*0.035));
+  const cp=bottom.reduce((a,b)=>({x:a.x+b.x,y:a.y+b.y}),{x:0,y:0});
+  if(bottom.length){cp.x/=bottom.length;cp.y/=bottom.length;}
+  addSupportTorque(p,cp,{x:0,y:1},1/60);
+  p.vx*=LINEAR_FRICTION;
+  p.va*=ANGULAR_DAMPING;
+  return {cp};
+}
+
+function keepCurrentInside(p){
+  const pts=rectCorners(p),xs=pts.map(v=>v.x),minX=Math.min(...xs),maxX=Math.max(...xs);
+  if(minX<0){p.x-=minX;p.vx*=-0.15;p.va*=0.75;}
+  if(maxX>W){p.x-=maxX-W;p.vx*=-0.15;p.va*=0.75;}
 }
 
 function updateCamera(){
-  if(!pieces.length) {
-    groundY=groundWorldY-cameraY;
-    return;
-  }
-
-  // タワー最上部が画面上部に近づいたら、カメラを上へ追従させる。
-  const top=Math.min(...pieces.map(p => Math.min(...rectCorners(p).map(v=>v.y))));
+  if(!pieces.length){groundY=groundWorldY-cameraY;return;}
+  const top=Math.min(...pieces.map(p=>Math.min(...rectCorners(p).map(v=>v.y))));
   const targetScreenTop=Math.max(150,H*0.28);
-  // world座標のYは下方向が正。タワーの頂点が画面上部へ近づいたら、
-  // カメラを「上方向（負のY）」へ動かして、タワー全体を画面内に戻す。
   const desiredCamera=top-targetScreenTop;
-  if(desiredCamera<cameraY){
-    cameraY=desiredCamera;
-  }
+  if(desiredCamera<cameraY) cameraY=desiredCamera;
   groundY=groundWorldY-cameraY;
 }
 
@@ -307,68 +250,60 @@ function update(dt){
   const now=performance.now();
 
   if(current && current.falling){
-    const wasSupported=current.supported===true;
     current.supported=false;
-    current.contactImpulseApplied=wasSupported;
+    current.contactKey=null;
+
     current.vy+=GRAVITY*dt;
     current.vx*=Math.pow(AIR,dt*60);
     current.vy*=Math.pow(AIR,dt*20);
     current.x+=current.vx*dt;
     current.y+=current.vy*dt;
     current.a+=current.va*dt;
-
-    // まず画面外への飛び出しを防ぐ。
     keepCurrentInside(current);
 
-    let touched=false;
-
-    // 1フレーム中に複数回押し戻す。複数ピースの境界に入った際の
-    // 「一気に横へ飛ぶ」「画面外へ飛ぶ」を防ぐため、最も深い接触から処理。
-    for(let i=0;i<6;i++){
+    let support=null;
+    // 最も深い接触だけを支持点として使う。複数のピースから同時に
+    // 回転力を受けて暴れるのを防ぐ。
+    for(let pass=0;pass<4;pass++){
       let best=null;
       for(const p of pieces){
         const hit=sat(current,p);
-        if(hit && (!best || hit.depth>best.hit.depth)) best={p,hit};
+        if(hit && (!best||hit.depth>best.hit.depth)) best={p,hit};
       }
       if(!best) break;
-
-      // 一度だけ実際の押し戻し処理を行う。
-      resolveCurrentAgainstPlaced(current,best.p);
-      touched=true;
+      const r=resolveSupportCollision(current,best.p,best.hit);
+      if(r.ny>0.35){
+        support={piece:best.p,point:r.cp};
+      }
       keepCurrentInside(current);
     }
 
-    const groundHit=resolveGround(current);
-    if(groundHit){
-      touched=true;
-      current.supported=true;
-      current.vy=0;
-      current.va*=0.8;
-    }
+    const ground=resolveGround(current);
+    if(ground && !support) support={piece:null,point:ground.cp};
 
-    // 支えられている時だけ静止判定を進める。
-    // 空中にいる時間だけで固定されることはない。
-    if(current.supported && Math.abs(current.vy)<REST_VEL){
-      current.settle=(current.settle||0)+dt;
+    if(support){
+      current.supported=true;
+      current.contactKey=support.piece ? support.piece.id : "ground";
+      current.vy=0;
+      current.vx*=Math.pow(0.55,dt);
+
+      // 接触後は回転を自然減衰。ただし重心が支点の外側にある場合は
+      // 重力トルクだけが残るため、傾き→安定の挙動になる。
+      current.va*=Math.pow(0.82,dt*60);
+      if(Math.abs(current.vx)<5) current.vx=0;
+      if(Math.abs(current.va)<0.055) current.va=0;
+
+      if(Math.abs(current.vy)<REST_VEL && Math.abs(current.va)<REST_ANGULAR){
+        current.settle+=dt;
+      }else current.settle=0;
     }else{
       current.settle=0;
     }
 
-    // 接触中は角速度を徐々に減衰させ、最終的に静止させる。
-    if(current.supported){
-      current.va*=Math.pow(0.72,dt*60);
-    }
-
-    // 接触直後の微小な振動を吸収。
-    if(current.supported && current.settle>0.12){
-      current.vy=0;
-      if(Math.abs(current.vx)<7) current.vx=0;
-      if(Math.abs(current.va)<0.45) current.va=0;
-    }
-
-    // 「乗っている」ことを確認してから固定する。
-    if(current.supported && current.settle>0.24 &&
-       Math.abs(current.vy)<8 && Math.abs(current.va)<0.55){
+    // 十分に静止したら固定。固定後に回転処理は一切行わない。
+    if(current.supported && current.settle>=SETTLE_TIME &&
+       Math.abs(current.vx)<6 && Math.abs(current.va)<REST_ANGULAR){
+      current.vx=0; current.vy=0; current.va=0;
       pieces.push(current);
       current=null;
       updateCamera();
@@ -383,104 +318,50 @@ function update(dt){
     spawn();
   }
 }
+
 function drawPiece(p){
   ctx.save();
   ctx.translate(p.x,p.y-cameraY);
   ctx.rotate(p.a);
-
-  if(p.processed){
-    ctx.drawImage(p.processed.im,-p.w/2,-p.h/2,p.w,p.h);
-  }else{
-    ctx.drawImage(p.im,-p.w/2,-p.h/2,p.w,p.h);
-  }
-
+  ctx.drawImage(p.processed ? p.processed.im : p.im,-p.w/2,-p.h/2,p.w,p.h);
   ctx.restore();
 }
 
 function draw(){
   ctx.clearRect(0,0,W,H);
-
   ctx.strokeStyle="rgba(70,60,50,.12)";
   ctx.lineWidth=1;
-  ctx.beginPath();
-  ctx.moveTo(0,groundY+.5);
-  ctx.lineTo(W,groundY+.5);
-  ctx.stroke();
-
+  ctx.beginPath();ctx.moveTo(0,groundY+.5);ctx.lineTo(W,groundY+.5);ctx.stroke();
   for(const p of pieces) drawPiece(p);
   if(current) drawPiece(current);
-
   if(current && !current.falling){
-    ctx.save();
-    ctx.globalAlpha=.22;
-    ctx.setLineDash([5,5]);
-    ctx.strokeStyle="#554c42";
-    ctx.beginPath();
-    ctx.moveTo(current.x,0);
-    ctx.lineTo(current.x,groundY);
-    ctx.stroke();
-    ctx.restore();
+    ctx.save();ctx.globalAlpha=.22;ctx.setLineDash([5,5]);ctx.strokeStyle="#554c42";
+    ctx.beginPath();ctx.moveTo(current.x,0);ctx.lineTo(current.x,groundY);ctx.stroke();ctx.restore();
   }
 }
 
 function loop(t){
-  const dt=Math.min((t-last)/1000,.025);
-  last=t;
-  update(dt);
-  draw();
-  requestAnimationFrame(loop);
+  const dt=Math.min((t-last)/1000,.025);last=t;update(dt);draw();requestAnimationFrame(loop);
 }
 
-function pointerPos(e){
-  const r=canvas.getBoundingClientRect();
-  return {x:e.clientX-r.left,y:e.clientY-r.top};
-}
-
+function pointerPos(e){const r=canvas.getBoundingClientRect();return{x:e.clientX-r.left,y:e.clientY-r.top};}
 canvas.addEventListener("pointerdown",e=>{
-  if(!current || current.falling || !acceptingInput || gameEnded) return;
-  pointerId=e.pointerId;
-  dragging=true;
-  canvas.setPointerCapture(pointerId);
-  current.x=Math.max(
-    current.w/2,
-    Math.min(W-current.w/2,pointerPos(e).x)
-  );
+  if(!current||current.falling||!acceptingInput||gameEnded)return;
+  pointerId=e.pointerId;dragging=true;canvas.setPointerCapture(pointerId);
+  current.x=Math.max(current.w/2,Math.min(W-current.w/2,pointerPos(e).x));
 });
-
 canvas.addEventListener("pointermove",e=>{
-  if(!dragging || e.pointerId!==pointerId || !current) return;
-  current.x=Math.max(
-    current.w/2,
-    Math.min(W-current.w/2,pointerPos(e).x)
-  );
+  if(!dragging||e.pointerId!==pointerId||!current)return;
+  current.x=Math.max(current.w/2,Math.min(W-current.w/2,pointerPos(e).x));
 });
-
 canvas.addEventListener("pointerup",e=>{
-  if(!dragging || e.pointerId!==pointerId || !current) return;
-  dragging=false;
-  current.falling=true;
-  current.vy=20;
-  current.va=(Math.random()-.5)*0.6;
+  if(!dragging||e.pointerId!==pointerId||!current)return;
+  dragging=false;current.falling=true;current.vy=20;current.va=0;current.settle=0;
 });
-
 canvas.addEventListener("pointercancel",()=>{dragging=false});
+rotateLeftBtn.addEventListener("pointerdown",e=>{e.preventDefault();rotateCurrent(-ROTATE_STEP);});
+rotateRightBtn.addEventListener("pointerdown",e=>{e.preventDefault();rotateCurrent(ROTATE_STEP);});
+restartBtn.onclick=reset;resetBtn.onclick=reset;
 
-rotateLeftBtn.addEventListener("pointerdown",e=>{
-  e.preventDefault();
-  rotateCurrent(-ROTATE_STEP);
-});
-
-rotateRightBtn.addEventListener("pointerdown",e=>{
-  e.preventDefault();
-  rotateCurrent(ROTATE_STEP);
-});
-
-restartBtn.onclick=reset;
-resetBtn.onclick=reset;
-
-loadImages().then(()=>{
-  resize();
-  reset();
-  requestAnimationFrame(loop);
-});
+loadImages().then(()=>{resize();reset();requestAnimationFrame(loop);});
 })();
