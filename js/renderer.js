@@ -1,4 +1,4 @@
-/* v18.6 - Canvas renderer with exact Matter part / image coordinate diagnostics */
+/* v18.7 - Canvas renderer with corrected image/contour transform diagnostics */
 const Renderer = (() => {
   const canvas=document.getElementById('gameCanvas');
   const ctx=canvas.getContext('2d');
@@ -17,10 +17,15 @@ const Renderer = (() => {
   function clear(){ctx.clearRect(0,0,width,height);}
 
   function drawLocalContour(body,contours,cameraY){
+    // v18.7: use exactly the same transform order as drawPiece().
+    // Image rendering is: Body position -> rotate -> image-local offset.
+    // The previous debug contour rendering was: Body position -> offset -> rotate,
+    // which made the blue contour drift away from the actual image as the piece rotated.
     const off=(body.plugin&&body.plugin.imageVisualOffset)||{x:0,y:0};
     ctx.save();
-    ctx.translate(body.position.x+off.x,body.position.y-cameraY+off.y);
+    ctx.translate(body.position.x,body.position.y-cameraY);
     ctx.rotate(body.angle);
+    ctx.translate(off.x,off.y);
     ctx.strokeStyle='rgba(0,90,255,0.95)';
     ctx.lineWidth=1.5;
     for(const poly of contours){
@@ -78,7 +83,7 @@ const Renderer = (() => {
   }
 
   function drawPartCentroids(body,cameraY){
-    // v18.6: yellow markers are the ACTUAL Matter.js part.position values,
+    // v18.7: yellow markers are the ACTUAL Matter.js part.position values,
     // not the originally stored triangle centroids. This lets us verify
     // whether Matter preserved the intended local geometry.
     const parts=getCollisionParts(body);

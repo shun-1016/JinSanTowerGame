@@ -1,4 +1,4 @@
-/* v18.6 - solo game / stable standby input / single-piece transform diagnosis */
+/* v18.7 - solo game / stable standby input / single-piece transform diagnosis */
 const Game = (() => {
   let images=[];
   let pieces=[];
@@ -12,7 +12,7 @@ const Game = (() => {
   let spawnAt=0;
   const NEXT_PIECE_DELAY=500;
 
-  // v18.5 diagnostic mode: 04.png is the fixed test piece by default.
+  // v18.7 diagnostic mode: 04.png is the fixed test piece by default.
   // Add ?debug=off to restore the normal 01.png -> 21.png sequence.
   const DEBUG_SINGLE_PIECE=new URLSearchParams(location.search).get("debug")!=="off";
   const DEBUG_PIECE_INDEX=3;
