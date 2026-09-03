@@ -123,7 +123,7 @@ function spawn(){
   const id=queue.shift();
   if(id===undefined){endGame("使用できる画像がありません");return}
   const src=images[id],processed=processImage(src);
-  current={id,im:src,processed,x:W/2,y:cameraY+Math.max(45,processed.h/2+6),w:processed.w,h:processed.h,parts:processed.parts,a:0,vx:0,vy:0,va:0,falling:false,settle:0,supported:false,contactKey:null,lastSupport:null,sleepReason:"",shakeSamples:[],shakeTimer:0,supportGrace:0};
+  current={id,im:src,processed,x:W/2,y:cameraY+Math.max(45,processed.h/2+6),w:processed.w,h:processed.h,parts:processed.parts,a:0,vx:0,vy:0,va:0,falling:false,settle:0,supported:false,contactKey:null,lastSupport:null,sleepReason:"",shakeSamples:[],shakeTimer:0,supportGrace:0,landed:false};
   acceptingInput=true; statusEl.textContent="ピースを配置";
 }
 function reset(){
@@ -237,9 +237,14 @@ function update(dt){
       current.vy=0;current.vx*=Math.pow(.45,dt);current.va*=Math.pow(TORQUE_DAMPING,dt*60);
       if(Math.abs(current.vx)<4)current.vx=0;
       if(Math.abs(current.va)<REST_ANGULAR)current.va*=.45;
+      // 一度でも正常な接地を確認したら「着地済み」とする。
+      // 以後の微小なSAT判定抜けでは、固定用タイマーをリセットしない。
+      if(!current.landed){
+        current.landed=true;
+        current.shakeTimer=0;
+        current.shakeSamples=[];
+      }
     }else if(current.supportGrace>0&&Math.abs(current.vy)<20&&Math.abs(current.va)<UNSTABLE_VA){
-      // SATの微小な判定抜けで「接地→非接地」を1フレームだけ繰り返しても、
-      // 観測タイマーをリセットしない。
       current.supportGrace=Math.max(0,current.supportGrace-dt);
       current.supported=true;
     }else{
@@ -247,29 +252,18 @@ function update(dt){
       current.supportGrace=0;
     }
 
-    if(current.supported){
-      // 接地後は「静止しきるまで待つ」のではなく、一定時間だけ観測して
-      // その中央値をゲーム上の確定位置として採用する。
+    // landed後はsupport判定が一瞬falseになっても観測を継続する。
+    // 「一度接地した」というゲーム上の事実を、物理演算の微小な判定揺れから分離する。
+    if(current.landed){
       current.shakeTimer+=dt;
       current.shakeSamples.push({x:current.x,y:current.y,a:current.a});
       if(current.shakeSamples.length>SHAKE_MAX_SAMPLES)current.shakeSamples.shift();
 
       const median=(arr)=>{const v=[...arr].sort((a,b)=>a-b);const m=Math.floor(v.length/2);return v.length%2?v[m]:(v[m-1]+v[m])/2};
-      const firstThird=current.shakeSamples.slice(0,Math.max(1,Math.floor(current.shakeSamples.length/3)));
-      const lastThird=current.shakeSamples.slice(Math.floor(current.shakeSamples.length*2/3));
       const xs=current.shakeSamples.map(v=>v.x),ys=current.shakeSamples.map(v=>v.y),as=current.shakeSamples.map(v=>v.a);
-      const driftX=median(lastThird.map(v=>v.x))-median(firstThird.map(v=>v.x));
-      const driftY=median(lastThird.map(v=>v.y))-median(firstThird.map(v=>v.y));
-      const driftA=median(lastThird.map(v=>v.a))-median(firstThird.map(v=>v.a));
-      const clearlyUnstable=Math.abs(current.vx)>UNSTABLE_VX||Math.abs(current.va)>UNSTABLE_VA;
 
-      // 大きく動き続けている間だけ観測をやり直す。
-      // 小さな揺れや一時的な外れ値ではタイマーをリセットしない。
-      if(clearlyUnstable&&current.shakeTimer<MAX_OBSERVE_TIME){
-        current.shakeTimer=Math.max(0,current.shakeTimer-dt*.5);
-      }
-
-      // 1.2秒以降は通常固定。2秒に達したら、多少揺れていても必ず固定する。
+      // 1.2秒で通常固定、2.0秒では必ず固定。
+      // ここにはsupport判定や速度判定を条件として追加しない。
       const enoughForNormalFix=current.shakeTimer>=NORMAL_FIX_TIME&&current.shakeSamples.length>=4;
       const forceFix=current.shakeTimer>=MAX_OBSERVE_TIME&&current.shakeSamples.length>=4;
 
@@ -277,7 +271,7 @@ function update(dt){
         const mx=median(xs),my=median(ys),ma=median(as);
         current.x=mx;current.y=my;current.a=ma;
 
-        // 固定直前は角度を変えず、位置だけ最小限押し戻す。
+        // 固定直前は位置だけ最小限補正。角度は中央値から変更しない。
         for(let pass=0;pass<3;pass++){
           let corrected=false;
           for(const p of pieces){const hit=satPieces(current,p);if(hit){
@@ -288,8 +282,8 @@ function update(dt){
         }
         current.vx=0;current.vy=0;current.va=0;current.a=ma;
         current.sleepReason=forceFix
-          ? "SLEEP: 2.0s max observation / median"
-          : "SLEEP: 1.2s observation / median";
+          ? "SLEEP: 2.0s forced after landed / median"
+          : "SLEEP: 1.2s after landed / median";
         pieces.push(current);current=null;updateCamera();score++;scoreEl.textContent=String(score);turnLockedUntil=now+TURN_DELAY;
         statusEl.textContent="次のピース";
       }
@@ -312,12 +306,12 @@ function drawDebug(){
   const point=sp?.point?`${sp.point.x.toFixed(1)}, ${sp.point.y.toFixed(1)}`:"-";
   const n=sp?.normal?`${sp.normal.x.toFixed(2)}, ${sp.normal.y.toFixed(2)}`:"-";
   debugEl.textContent=[
-    `状態: ${c.falling?(c.supported?"接地・静止判定中":"落下中"):"操作中"}`,
+    `状態: ${c.falling?(c.landed?(c.supported?"着地済み・観測中":"着地済み・観測継続"):"落下中"):"操作中"}`,
     `x ${c.x.toFixed(1)}  y ${c.y.toFixed(1)}`,
     `角度 ${deg}°  角速度 ${va}°/s`,
     `vx ${c.vx.toFixed(2)}  vy ${c.vy.toFixed(2)}`,
     `観測 ${c.shakeTimer.toFixed(2)}s / 通常固定 ${NORMAL_FIX_TIME.toFixed(2)}s / 強制固定 ${MAX_OBSERVE_TIME.toFixed(2)}s`,
-    `観測方式: 0.8秒以上で判定開始・1.2秒で通常固定・2.0秒で強制固定 / 中央値を採用`,
+    `観測方式: 一度接地したらタイマー維持・1.2秒で通常固定・2.0秒で必ず強制固定 / 中央値を採用`,
     `支点: ${c.contactKey||"-"}  normal ${n}`,
     `接触点: ${point}`,
     `判定: 明確な不安定 |vx|>${UNSTABLE_VX} / |va|>${UNSTABLE_VA.toFixed(2)} の場合のみ観測を少し延長`,
