@@ -11,7 +11,7 @@
   <header class="header">
     <h1>JinSan Tower Game</h1>
     <div class="headerRight">
-      <span id="version">v17.4</span>
+      <span id="version">v17.5</span>
       <span id="score">Score: 0</span>
     </div>
   </header>
@@ -19,16 +19,18 @@
   <main>
     <div class="stage">
       <canvas id="gameCanvas"></canvas>
+      <div id="status" class="status">読み込み中…</div>
     </div>
     <div class="controls">
-      <button id="rotateLeft" type="button">↶</button>
+      <button id="rotateLeft" type="button" aria-label="左回転">↶</button>
       <button id="drop" type="button">落とす</button>
-      <button id="rotateRight" type="button">↷</button>
+      <button id="rotateRight" type="button" aria-label="右回転">↷</button>
     </div>
-    <div id="debug" class="debug" hidden></div>
   </main>
 
-  <script src="lib/matter.min.js"></script>
+  <!-- Matter.js is loaded before the game modules. v17.5 intentionally uses
+       the CDN so the project does not depend on a missing local lib file. -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.20.0/matter.min.js"></script>
   <script src="js/physics.js"></script>
   <script src="js/piece.js"></script>
   <script src="js/renderer.js"></script>
