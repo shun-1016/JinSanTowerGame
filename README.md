@@ -1,21 +1,23 @@
-# ベビータワーバトル
+# JinSanTowerGame v17
 
-送ってもらった21枚の写真を積み上げピースとして使用する、ローカル動作の簡易ゲームです。
-
-## 遊び方
-1. `index.html` をブラウザで開く
-2. プレイヤー1から交互に操作
-3. 画面上の写真を左右にドラッグして位置を決める
-4. 指／マウスを離すと落下
-5. できるだけ高く積み上げる
-
-## ピースサイズ
-元画像のアスペクト比を維持し、ゲーム内では最大辺が約150pxになるよう自動縮小しています。画像ごとの縦横比は変更しません。
+Matter.js移行用の新しいフォルダ構成です。
 
 ## 構成
-- `index.html` : 画面
-- `style.css` : デザイン
-- `game.js` : ゲーム処理・簡易物理演算
-- `assets/` : 21枚の写真
 
-外部サーバーやデータベースは使用しません。
+- `index.html` : HTML / 読み込み順
+- `style.css` : UI / Canvasレイアウト
+- `js/main.js` : 起動・ゲームループ
+- `js/game.js` : ゲームルール
+- `js/physics.js` : Matter.js物理処理
+- `js/piece.js` : ピース定義
+- `js/renderer.js` : Canvas描画
+- `js/input.js` : 入力処理
+- Matter.js 0.20.0 : jsDelivr CDNから読み込み（GitHub Pagesでそのまま動作）
+- `assets/01.png` ～ `21.png` : 既存の加工済み画像
+
+## 注意
+
+v17では既存の `assets` フォルダはそのまま利用します。
+このZIPには画像素材は含めていません。
+
+Matter.js本体は `lib/matter.min.js` に配置しています。
