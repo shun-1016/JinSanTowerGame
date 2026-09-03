@@ -70,23 +70,17 @@ const Physics = (() => {
   }
 
   function makeTrianglePart(triangle,options){
-    // Triangle vertices are kept in image-local coordinates. Matter Body.create
-    // needs convex, clockwise vertices. Move the triangle centroid to its own
-    // local origin, then keep that centroid as the part's position.
+    // IMPORTANT: pass the triangle to Matter at its ORIGINAL image-local
+    // centroid.  Bodies.fromVertices(x,y,[triangle]) recentres the triangle
+    // around its own centroid, then places that centroid at (x,y).  Therefore
+    // x/y must be the triangle centroid; using x=0,y=0 would collapse every
+    // triangle onto the same point.
     const cx=(triangle[0].x+triangle[1].x+triangle[2].x)/3;
     const cy=(triangle[0].y+triangle[1].y+triangle[2].y)/3;
-    let local=triangle.map(v=>({x:v.x-cx,y:v.y-cy}));
-
-    // Ear clipping above produces clockwise triangles for the screen-coordinate
-    // convention. Keep the order; reverse only if a numerical edge case flips it.
-    if(area(local)<0) local.reverse();
-
-    return Body.create({
+    return Bodies.fromVertices(cx,cy,[triangle],{
       ...options,
-      label:'piece-part',
-      position:{x:cx,y:cy},
-      vertices:local
-    });
+      label:'piece-part'
+    },false,0.001,0.001,0.001);
   }
 
   function createPieceBody(x,y,w,h,shape){
@@ -112,9 +106,9 @@ const Physics = (() => {
       const parts=triangles.map(t=>makeTrianglePart(t,options));
 
       if(parts.length){
-        // Build the compound body from parts that already retain their original
-        // triangle-centroid positions. Body.setParts fixes them together and
-        // recomputes the compound centre of mass.
+        // Build one rigid compound body.  Each part already has its position
+        // in image-local coordinates, so Body.create can preserve the complete
+        // spatial arrangement of the triangulation.
         body=Body.create({...options,parts:parts.slice()});
 
         // We created the geometry around image-local (0,0), so after Body.create
@@ -150,6 +144,7 @@ const Physics = (() => {
       x:(t[0].x+t[1].x+t[2].x)/3,
       y:(t[0].y+t[1].y+t[2].y)/3
     }));
+    body.plugin.debugPartCount=body.parts&&body.parts.length>1?body.parts.length-1:body.parts.length;
     return body;
   }
 

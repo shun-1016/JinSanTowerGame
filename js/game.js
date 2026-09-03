@@ -12,10 +12,9 @@ const Game = (() => {
   let spawnAt=0;
   const NEXT_PIECE_DELAY=500;
 
-  // Diagnostic mode: repeatedly spawn 04.png so collision alignment can be
-  // checked against one fixed silhouette. Set to false to restore the normal
-  // 01.png -> 21.png sequence.
-  const DEBUG_SINGLE_PIECE=true;
+  // v18.5 diagnostic mode: 04.png is the fixed test piece by default.
+  // Add ?debug=off to restore the normal 01.png -> 21.png sequence.
+  const DEBUG_SINGLE_PIECE=new URLSearchParams(location.search).get("debug")!=="off";
   const DEBUG_PIECE_INDEX=3;
 
   const status=document.getElementById("status");
@@ -44,7 +43,7 @@ const Game = (() => {
     const y=cameraY+Math.max(60,Math.min(100,stageH*0.18));
     const spawnIndex=DEBUG_SINGLE_PIECE?DEBUG_PIECE_INDEX:nextIndex;
     const p=Piece.create(spawnIndex,images,x,y);
-    nextIndex=(nextIndex+1)%images.length;
+    if(!DEBUG_SINGLE_PIECE) nextIndex=(nextIndex+1)%images.length;
     current=p;
     Physics.add(p.body);
     Physics.hold(p.body,x,y,0);

@@ -80,12 +80,15 @@ const Renderer = (() => {
     const off=(body.plugin&&body.plugin.imageVisualOffset)||{x:0,y:0};
     ctx.save();
     ctx.fillStyle='rgba(255,190,0,1)';
+    ctx.strokeStyle='rgba(90,55,0,1)';
+    ctx.lineWidth=1;
     for(const p of list){
       const x=body.position.x+off.x+(p.x*c-p.y*s);
       const y=body.position.y+off.y+(p.x*s+p.y*c)-cameraY;
       ctx.beginPath();
-      ctx.arc(x,y,1.2,0,Math.PI*2);
+      ctx.arc(x,y,3.2,0,Math.PI*2);
       ctx.fill();
+      ctx.stroke();
     }
     ctx.restore();
   }
@@ -115,6 +118,7 @@ const Renderer = (() => {
 
     debugEl.innerHTML=
       `輪郭解析: ${idx}.png　輪郭頂点: ${contourPts}<br>`+
+      `DEBUG: 04.png固定　(通常順番へ戻す: ?debug=off)<br>`+
       `物理三角形: ${actualTris}　物理頂点: ${actualVerts}　`+
       `Body: ${bodyOk?'OK':'NG'}　Fallback: ${fallback?'YES':'NO'}<br>`+
       `COM Offset: x=${off.x.toFixed(1)}, y=${off.y.toFixed(1)}　`+
