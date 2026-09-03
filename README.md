@@ -1,17 +1,12 @@
-# JinSanTowerGame v17.8
+# JinSan Tower Game v17.10
 
-## 今回の修正
-- Matter.jsの読み込みを `lib/matter.min.js` 依存からCDN読み込みへ変更
-- Matter.js → 物理層 → Piece → Renderer → Input → Game → Main の読み込み順を整理
-- 起動時に21枚の画像をプリロードしてから初期ピースを生成
-- 初期ピースはMatter Worldへ追加後にStatic待機
-- 落下時はStatic解除＋Sleep解除
-- 落下したピースを即座に固定済み配列へ移し、次ピースを即座に生成
-- iPhone SEを含むスマホ幅向けヘッダーを調整
-- ヘッダーにバージョン情報 `v17.8` を表示
+v17.10 fixes camera direction while retaining v17.9 standby input behavior.
 
-## 既存資産
-`assets/01.png` ～ `assets/21.png` は既存リポジトリのものをそのまま使用します。
+- Camera remains fixed until the settled tower top reaches 45% of the stage.
+- After the threshold, cameraY is allowed to become negative.
+- The tower top is maintained around the 45% line as the tower grows.
+- Negative cameraY moves the ground downward on screen, so the base gradually disappears instead of leaving a gap underneath it.
+- Falling/current pieces are excluded from camera-height calculation.
+- Existing v17.9 horizontal-only standby-piece input behavior is retained.
 
-## 物理形状
-v17.8ではまずMatter.jsの落下・衝突・回転を確実に動作させることを優先し、画像は矩形Colliderを使用しています。
+Existing assets and unchanged project files are reused. Only changed files are included.
