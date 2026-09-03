@@ -1,4 +1,4 @@
-/* v18.3 - solo game / stable standby input */
+/* v18.4 - solo game / stable standby input / single-piece shape diagnosis */
 const Game = (() => {
   let images=[];
   let pieces=[];
@@ -11,6 +11,12 @@ const Game = (() => {
   let ready=false;
   let spawnAt=0;
   const NEXT_PIECE_DELAY=500;
+
+  // Diagnostic mode: repeatedly spawn 04.png so collision alignment can be
+  // checked against one fixed silhouette. Set to false to restore the normal
+  // 01.png -> 21.png sequence.
+  const DEBUG_SINGLE_PIECE=true;
+  const DEBUG_PIECE_INDEX=3;
 
   const status=document.getElementById("status");
 
@@ -36,7 +42,8 @@ const Game = (() => {
     if(!ready) return;
     const x=stageW/2;
     const y=cameraY+Math.max(60,Math.min(100,stageH*0.18));
-    const p=Piece.create(nextIndex,images,x,y);
+    const spawnIndex=DEBUG_SINGLE_PIECE?DEBUG_PIECE_INDEX:nextIndex;
+    const p=Piece.create(spawnIndex,images,x,y);
     nextIndex=(nextIndex+1)%images.length;
     current=p;
     Physics.add(p.body);
@@ -64,9 +71,7 @@ const Game = (() => {
     dropped.dropped=true;
     pieces.push(dropped);
     current=null;
-
     Physics.release(dropped.body);
-
     score++;
     document.getElementById("score").textContent=`Score: ${score}`;
     spawnAt=performance.now()+NEXT_PIECE_DELAY;
@@ -78,7 +83,6 @@ const Game = (() => {
 
   function updateCamera(){
     if(!pieces.length) return;
-
     let towerTop=Infinity;
     let settledCount=0;
     for(const p of pieces){
@@ -101,12 +105,10 @@ const Game = (() => {
 
   function update(dt){
     Physics.step(dt);
-
     if(!current && spawnAt && performance.now()>=spawnAt){
       spawnAt=0;
       spawn();
     }
-
     updateCamera();
   }
 
@@ -115,17 +117,12 @@ const Game = (() => {
     for(const p of pieces) Renderer.drawPiece(p,cameraY);
     if(current) Renderer.drawPiece(current,cameraY);
     Renderer.drawGround(stageH-12,cameraY);
-
-    // Keep one compact diagnostic record visible: current piece if present,
-    // otherwise the most recently dropped piece.
     Renderer.renderDebugTarget(current,pieces);
   }
 
   async function init(){
     try{
-      if(typeof Matter==="undefined"){
-        throw new Error("Matter.jsが読み込まれていません");
-      }
+      if(typeof Matter==="undefined") throw new Error("Matter.jsが読み込まれていません");
       resize();
       showStatus("画像を読み込み中…");
       images=await Piece.preload();

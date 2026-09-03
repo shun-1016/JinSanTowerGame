@@ -1,4 +1,4 @@
-/* v18.3 - Canvas renderer with contour vs actual Matter.js diagnostics */
+/* v18.4 - Canvas renderer with contour vs actual Matter.js diagnostics */
 const Renderer = (() => {
   const canvas=document.getElementById('gameCanvas');
   const ctx=canvas.getContext('2d');
@@ -35,8 +35,6 @@ const Renderer = (() => {
   }
 
   function getCollisionParts(body){
-    // For a compound body, parts[0] is the parent/hull. Matter.js collision
-    // uses the child parts, so only those are the "actual" polygons to debug.
     return body.parts&&body.parts.length>1?body.parts.slice(1):body.parts||[];
   }
 
@@ -50,7 +48,6 @@ const Renderer = (() => {
     for(const part of parts){
       const vs=part.vertices;
       if(!vs||vs.length<3) continue;
-
       ctx.beginPath();
       ctx.moveTo(vs[0].x,vs[0].y-cameraY);
       for(let i=1;i<vs.length;i++) ctx.lineTo(vs[i].x,vs[i].y-cameraY);
@@ -58,7 +55,6 @@ const Renderer = (() => {
       ctx.fill();
       ctx.stroke();
 
-      // Green = actual Matter.js polygon vertices in world space.
       ctx.fillStyle='rgba(0,170,0,1)';
       for(const v of vs){
         ctx.beginPath();
@@ -68,11 +64,29 @@ const Renderer = (() => {
       ctx.fillStyle='rgba(255,0,0,0.08)';
     }
 
-    // Magenta = Matter.js body position (COM).
+    // Magenta = actual compound Body position / COM.
     ctx.fillStyle='rgba(190,0,190,1)';
     ctx.beginPath();
     ctx.arc(body.position.x,body.position.y-cameraY,3,0,Math.PI*2);
     ctx.fill();
+    ctx.restore();
+  }
+
+  function drawPartCentroids(body,cameraY){
+    const list=body.plugin&&body.plugin.debugPartCentroids||[];
+    if(!list.length) return;
+    const angle=body.angle||0;
+    const c=Math.cos(angle),s=Math.sin(angle);
+    const off=(body.plugin&&body.plugin.imageVisualOffset)||{x:0,y:0};
+    ctx.save();
+    ctx.fillStyle='rgba(255,190,0,1)';
+    for(const p of list){
+      const x=body.position.x+off.x+(p.x*c-p.y*s);
+      const y=body.position.y+off.y+(p.x*s+p.y*c)-cameraY;
+      ctx.beginPath();
+      ctx.arc(x,y,1.2,0,Math.PI*2);
+      ctx.fill();
+    }
     ctx.restore();
   }
 
@@ -83,6 +97,7 @@ const Renderer = (() => {
     const contours=plugin.debugContours||[];
     if(contours.length) drawLocalContour(b,contours,cameraY);
     drawActualPhysics(b,cameraY);
+    drawPartCentroids(b,cameraY);
   }
 
   function updateDebugPanel(p){
@@ -96,6 +111,7 @@ const Renderer = (() => {
     const off=plugin.imageVisualOffset||{x:0,y:0};
     const bodyOk=plugin.debugBodyCreated===true;
     const fallback=plugin.debugFallback===true;
+    const com=(plugin.debugCompoundCOMLocal||{x:0,y:0});
 
     debugEl.innerHTML=
       `輪郭解析: ${idx}.png　輪郭頂点: ${contourPts}<br>`+

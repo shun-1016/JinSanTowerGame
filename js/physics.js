@@ -1,4 +1,4 @@
-/* v18.3 - physics body + actual Matter.js shape diagnostics */
+/* v18.4 - preserve triangle positions in a Matter.js compound body */
 const Physics = (() => {
   const {Engine,World,Bodies,Body,Sleeping}=Matter;
   const engine=Engine.create({enableSleeping:true,positionIterations:12,velocityIterations:10,constraintIterations:4});
@@ -8,12 +8,21 @@ const Physics = (() => {
 
   function setup(width,groundY){
     if(ground) World.remove(world,ground);
-    ground=Bodies.rectangle(width/2,groundY+14,Math.max(1000,width*3),28,{isStatic:true,label:'ground',friction:0.85,frictionStatic:1,restitution:0.01});
+    ground=Bodies.rectangle(width/2,groundY+14,Math.max(1000,width*3),28,{
+      isStatic:true,label:'ground',friction:0.85,frictionStatic:1,restitution:0.01
+    });
     World.add(world,ground);
   }
 
   function cross(a,b,c){return (b.x-a.x)*(c.y-a.y)-(b.y-a.y)*(c.x-a.x);}
-  function area(poly){let a=0;for(let i=0;i<poly.length;i++){const p=poly[i],q=poly[(i+1)%poly.length];a+=p.x*q.y-q.x*p.y;}return a/2;}
+  function area(poly){
+    let a=0;
+    for(let i=0;i<poly.length;i++){
+      const p=poly[i],q=poly[(i+1)%poly.length];
+      a+=p.x*q.y-q.x*p.y;
+    }
+    return a/2;
+  }
   function pointInTriangle(p,a,b,c){
     const c1=cross(a,b,p),c2=cross(b,c,p),c3=cross(c,a,p);
     const eps=1e-8;
@@ -27,10 +36,13 @@ const Physics = (() => {
   function triangulate(input){
     if(!input||input.length<3)return [];
     const poly=[];
-    for(const p of input){if(!poly.length||!samePoint(poly[poly.length-1],p))poly.push({x:p.x,y:p.y});}
+    for(const p of input){
+      if(!poly.length||!samePoint(poly[poly.length-1],p)) poly.push({x:p.x,y:p.y});
+    }
     if(poly.length>=2&&samePoint(poly[0],poly[poly.length-1]))poly.pop();
     if(poly.length<3)return [];
     if(area(poly)<0)poly.reverse();
+
     const indices=poly.map((_,i)=>i),triangles=[];
     let guard=0;
     while(indices.length>3){
@@ -46,7 +58,10 @@ const Physics = (() => {
           if(pointInTriangle(poly[id],a,b,c)){contains=true;break;}
         }
         if(contains)continue;
-        triangles.push([a,b,c]);indices.splice(i,1);earFound=true;break;
+        triangles.push([a,b,c]);
+        indices.splice(i,1);
+        earFound=true;
+        break;
       }
       if(!earFound)return [];
     }
@@ -54,23 +69,64 @@ const Physics = (() => {
     return triangles.filter(t=>Math.abs(area(t))>0.05);
   }
 
+  function makeTrianglePart(triangle,options){
+    // Triangle vertices are kept in image-local coordinates. Matter Body.create
+    // needs convex, clockwise vertices. Move the triangle centroid to its own
+    // local origin, then keep that centroid as the part's position.
+    const cx=(triangle[0].x+triangle[1].x+triangle[2].x)/3;
+    const cy=(triangle[0].y+triangle[1].y+triangle[2].y)/3;
+    let local=triangle.map(v=>({x:v.x-cx,y:v.y-cy}));
+
+    // Ear clipping above produces clockwise triangles for the screen-coordinate
+    // convention. Keep the order; reverse only if a numerical edge case flips it.
+    if(area(local)<0) local.reverse();
+
+    return Body.create({
+      ...options,
+      label:'piece-part',
+      position:{x:cx,y:cy},
+      vertices:local
+    });
+  }
+
   function createPieceBody(x,y,w,h,shape){
-    const options={label:'piece',friction:0.82,frictionStatic:0.95,frictionAir:0.004,restitution:0.01,density:0.002,sleepThreshold:40};
+    const options={
+      label:'piece',
+      friction:0.82,
+      frictionStatic:0.95,
+      frictionAir:0.004,
+      restitution:0.01,
+      density:0.002,
+      sleepThreshold:40
+    };
     const contour=shape&&shape.contour;
     const triangles=triangulate(contour);
     let body=null;
     let fallback=false;
 
     if(triangles.length){
-      body=Bodies.fromVertices(0,0,triangles,options,true,0.01,2,0.01);
-      if(body){
-        // Bodies.fromVertices recentres the compound body at its centre of mass.
-        // Save the local offset needed to keep the image centre aligned with the
-        // same geometry, then place the body at the requested game point.
-        const visualOffset={x:-body.position.x,y:-body.position.y};
+      // IMPORTANT:
+      // Do not pass image-space triangles directly as separate vertexSets to
+      // Bodies.fromVertices(). In Matter.js each set is reoriented around its
+      // own centre, which destroys the triangles' relative image-space offsets.
+      const parts=triangles.map(t=>makeTrianglePart(t,options));
+
+      if(parts.length){
+        // Build the compound body from parts that already retain their original
+        // triangle-centroid positions. Body.setParts fixes them together and
+        // recomputes the compound centre of mass.
+        body=Body.create({...options,parts:parts.slice()});
+
+        // We created the geometry around image-local (0,0), so after Body.create
+        // the body.position is the compound COM in that local coordinate system.
+        // Store the offset needed to render the image centre at local (0,0).
+        const comLocal={x:body.position.x,y:body.position.y};
+        const visualOffset={x:-comLocal.x,y:-comLocal.y};
+
         Body.setPosition(body,{x,y});
         body.plugin=body.plugin||{};
         body.plugin.imageVisualOffset=visualOffset;
+        body.plugin.debugCompoundCOMLocal=comLocal;
       }
     }
 
@@ -90,17 +146,36 @@ const Physics = (() => {
     body.plugin.debugFallback=fallback;
     body.plugin.debugShapeReady=!fallback&&triangles.length>0;
     body.plugin.debugBodyCreated=true;
+    body.plugin.debugPartCentroids=triangles.map(t=>({
+      x:(t[0].x+t[1].x+t[2].x)/3,
+      y:(t[0].y+t[1].y+t[2].y)/3
+    }));
     return body;
   }
 
   function add(body){World.add(world,body);}
   function hold(body,x,y,angle=0){
-    Body.setStatic(body,true);Body.setPosition(body,{x,y});Body.setAngle(body,angle);
-    Body.setVelocity(body,{x:0,y:0});Body.setAngularVelocity(body,0);Sleeping.set(body,true);
+    Body.setStatic(body,true);
+    Body.setPosition(body,{x,y});
+    Body.setAngle(body,angle);
+    Body.setVelocity(body,{x:0,y:0});
+    Body.setAngularVelocity(body,0);
+    Sleeping.set(body,true);
   }
-  function release(body){Body.setStatic(body,false);Sleeping.set(body,false);Body.setVelocity(body,{x:0,y:0.5});}
-  function move(body,x,y){Body.setPosition(body,{x,y});Body.setVelocity(body,{x:0,y:0});Sleeping.set(body,true);}
-  function rotate(body,delta){Body.rotate(body,delta);Sleeping.set(body,true);}
+  function release(body){
+    Body.setStatic(body,false);
+    Sleeping.set(body,false);
+    Body.setVelocity(body,{x:0,y:0.5});
+  }
+  function move(body,x,y){
+    Body.setPosition(body,{x,y});
+    Body.setVelocity(body,{x:0,y:0});
+    Sleeping.set(body,true);
+  }
+  function rotate(body,delta){
+    Body.rotate(body,delta);
+    Sleeping.set(body,true);
+  }
   function step(dt){Engine.update(engine,Math.max(1,Math.min(33,dt*1000)));}
   return {engine,world,setup,createPieceBody,add,hold,release,move,rotate,step};
 })();

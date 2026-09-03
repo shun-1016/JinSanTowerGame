@@ -19,8 +19,6 @@ const Input = (() => {
       pointerId=e.pointerId;
       startX=e.clientX;
       startY=e.clientY;
-      // Capture the exact body position at pointerdown. A tap must not cause
-      // even a tiny position jump, and vertical input is never applied.
       startPieceX=game.current.body.position.x;
       startPieceY=game.current.body.position.y;
       canvas.setPointerCapture(pointerId);
@@ -28,21 +26,13 @@ const Input = (() => {
 
     canvas.addEventListener("pointermove",e=>{
       if(!dragging || e.pointerId!==pointerId) return;
-
       const dx=e.clientX-startX;
       const dy=e.clientY-startY;
-
-      // A tap, or a predominantly vertical gesture, must not move the piece.
-      // Begin horizontal movement only after a small intentional gesture.
       if(!draggingHorizontally){
         if(Math.abs(dx)<MOVE_THRESHOLD) return;
         if(Math.abs(dx)<=Math.abs(dy)) return;
         draggingHorizontally=true;
       }
-
-      // Preserve the grab offset so the piece does not jump horizontally
-      // when the finger touches somewhere inside the image. Y is fixed to
-      // the exact pointerdown position for the entire gesture.
       game.moveCurrentTo(e.clientX, startX, startPieceX, startPieceY);
     });
 

@@ -1,4 +1,4 @@
-/* v18.3 - automatic alpha-contour analysis */
+/* v18.4 - automatic alpha-contour analysis */
 const Piece = (() => {
   const MAX_PIECE = 82;
   const ALPHA_THRESHOLD = 32;
@@ -117,9 +117,7 @@ const Piece = (() => {
         if(closed&&loop.length>=4){
           let clean=simplifyCollinear(loop);
           if(clean.length>100) clean=simplifyClosed(clean,0.55);
-          if(clean.length>=3){
-            loops.push(clean.map(p=>({x:p.x-pw/2,y:p.y-ph/2})));
-          }
+          if(clean.length>=3) loops.push(clean.map(p=>({x:p.x-pw/2,y:p.y-ph/2})));
         }
       }
     }
