@@ -1,4 +1,4 @@
-/* v20.2 - Canvas renderer with optional triangulation diagnostics */
+/* v20.3 - Canvas renderer with optional triangulation diagnostics */
 const Renderer = (() => {
   const canvas=document.getElementById('gameCanvas');
   const ctx=canvas.getContext('2d');
@@ -159,7 +159,9 @@ const Renderer = (() => {
     const contourPts=plugin.debugContourVertexCount||0;
     const parts=getCollisionParts(b);
     const actualVerts=parts.reduce((sum,part)=>sum+(part.vertices?part.vertices.length:0),0);
-    const actualTris=plugin.debugFallback?0:parts.length;
+    const actualParts=plugin.debugFallback?0:parts.length;
+    const sourceTris=plugin.debugTriangulatedCount||0;
+    const convexParts=plugin.debugConvexPartCount||actualParts;
     const off=plugin.imageVisualOffset||{x:0,y:0};
     const bodyOk=plugin.debugBodyCreated===true;
     const fallback=plugin.debugFallback===true;
@@ -183,7 +185,7 @@ const Renderer = (() => {
       `自己交差: ${si}${edge}<br>`+
       `三角形化: ${td.failed?'FAIL':'OK'}　理由: ${td.failReason||'-'}　`+
       `失敗時残頂点: ${td.remainingVertices??'-'}<br>`+
-      `物理三角形: ${actualTris}　物理頂点: ${actualVerts}　`+
+      `元三角形: ${sourceTris}　物理凸ポリゴン: ${convexParts}　物理頂点: ${actualVerts}　`+
       `Body: ${bodyOk?'OK':'NG'}　Fallback: ${fallback?'YES':'NO'}<br>`+
       `COM Local: x=${com.x.toFixed(2)}, y=${com.y.toFixed(2)}　`+
       `Image Offset: x=${off.x.toFixed(2)}, y=${off.y.toFixed(2)}<br>`+

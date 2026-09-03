@@ -1,8 +1,8 @@
-/* v20.2 - triangulation diagnostics build; physics geometry behavior unchanged */
+/* v20.3 - triangulation diagnostics build; physics geometry behavior unchanged */
 const Physics = (() => {
   const {Engine,World,Bodies,Body,Sleeping}=Matter;
   const engine=Engine.create({
-    // v20.2: stability test. Slightly reduce solver iterations so repeated
+    // v20.3: stability test. Slightly reduce solver iterations so repeated
     // contact corrections do not amplify tiny motions in large compound bodies.
     // Sleeping remains enabled and the sleep threshold is lowered below.
     enableSleeping:true,
@@ -140,18 +140,121 @@ const Physics = (() => {
     return triangulateDetailed(input).triangles;
   }
 
-  function makeTrianglePart(triangle,options){
-    // IMPORTANT: pass the triangle to Matter at its ORIGINAL image-local
-    // centroid.  Bodies.fromVertices(x,y,[triangle]) recentres the triangle
-    // around its own centroid, then places that centroid at (x,y).  Therefore
-    // x/y must be the triangle centroid; using x=0,y=0 would collapse every
-    // triangle onto the same point.
-    const cx=(triangle[0].x+triangle[1].x+triangle[2].x)/3;
-    const cy=(triangle[0].y+triangle[1].y+triangle[2].y)/3;
-    return Bodies.fromVertices(cx,cy,[triangle],{
+  function makeConvexPart(poly,options){
+    const cx=poly.reduce((sum,p)=>sum+p.x,0)/poly.length;
+    const cy=poly.reduce((sum,p)=>sum+p.y,0)/poly.length;
+    return Bodies.fromVertices(cx,cy,[poly],{
       ...options,
       label:'piece-part'
     },false,0.001,0.001,0.001);
+  }
+
+  function samePointExact(a,b){return Math.abs(a.x-b.x)<1e-6&&Math.abs(a.y-b.y)<1e-6;}
+
+  // Combine adjacent triangles whenever their union is still a convex polygon.
+  // This keeps the outer boundary identical to the triangulation while greatly
+  // reducing the number of Matter.js compound parts.
+  function mergeTwoConvexPolys(a,b){
+    const edges=[];
+    const addEdge=(p,q)=>{
+      for(let i=0;i<edges.length;i++){
+        if(samePointExact(edges[i][0],q)&&samePointExact(edges[i][1],p)){
+          edges.splice(i,1); return;
+        }
+      }
+      edges.push([p,q]);
+    };
+    for(let i=0;i<a.length;i++) addEdge(a[i],a[(i+1)%a.length]);
+    for(let i=0;i<b.length;i++) addEdge(b[i],b[(i+1)%b.length]);
+    if(edges.length<3) return null;
+
+    const outgoing=new Map();
+    const key=p=>`${p.x},${p.y}`;
+    for(const e of edges){
+      const k=key(e[0]);
+      if(!outgoing.has(k)) outgoing.set(k,[]);
+      outgoing.get(k).push(e);
+    }
+    const start=edges[0][0];
+    const poly=[start];
+    let cur=edges[0][1];
+    edges.splice(0,1);
+    let guard=0;
+    while(!samePointExact(cur,start)&&guard++<edges.length+5){
+      poly.push(cur);
+      const list=outgoing.get(key(cur))||[];
+      const idx=list.findIndex(e=>edges.includes(e));
+      if(idx<0) return null;
+      const e=list[idx];
+      const ei=edges.indexOf(e);
+      edges.splice(ei,1);
+      cur=e[1];
+    }
+    if(!samePointExact(cur,start)||poly.length<3||edges.length) return null;
+
+    const clean=simplifyPolygonCollinear(poly);
+    if(clean.length<3) return null;
+    const ar=area(clean);
+    if(ar<0) clean.reverse();
+    if(Math.abs(area(clean))<0.05) return null;
+    if(!isConvex(clean)) return null;
+    return clean;
+  }
+
+  function simplifyPolygonCollinear(poly){
+    if(poly.length<4) return poly.slice();
+    const out=[];
+    for(let i=0;i<poly.length;i++){
+      const a=poly[(i-1+poly.length)%poly.length],b=poly[i],c=poly[(i+1)%poly.length];
+      if(Math.abs(cross(a,b,c))>1e-7) out.push(b);
+    }
+    return out;
+  }
+
+  function isConvex(poly){
+    let sign=0;
+    for(let i=0;i<poly.length;i++){
+      const cr=cross(poly[i],poly[(i+1)%poly.length],poly[(i+2)%poly.length]);
+      if(Math.abs(cr)<=1e-7) continue;
+      const s=cr>0?1:-1;
+      if(!sign) sign=s;
+      else if(s!==sign) return false;
+    }
+    return sign!==0;
+  }
+
+  function convexDecompose(triangles){
+    // Start with one polygon per triangulation triangle. Repeatedly merge the
+    // first pair whose shared edge produces a convex union. For the small
+    // ~10-250 triangle counts used here this O(n^2) greedy pass is inexpensive,
+    // while avoiding the hundreds of tiny contacts that caused tower jitter.
+    let polys=triangles.map(t=>t.map(p=>({x:p.x,y:p.y})));
+    let changed=true;
+    while(changed){
+      changed=false;
+      outer:
+      for(let i=0;i<polys.length;i++){
+        for(let j=i+1;j<polys.length;j++){
+          let shared=false;
+          for(let ai=0;ai<polys[i].length&&!shared;ai++){
+            const a1=polys[i][ai],a2=polys[i][(ai+1)%polys[i].length];
+            for(let bj=0;bj<polys[j].length;bj++){
+              const b1=polys[j][bj],b2=polys[j][(bj+1)%polys[j].length];
+              if(samePointExact(a1,b2)&&samePointExact(a2,b1)){shared=true;break;}
+            }
+          }
+          if(!shared) continue;
+          const merged=mergeTwoConvexPolys(polys[i],polys[j]);
+          if(merged){
+            polys[i]=merged;
+            polys.splice(j,1);
+            changed=true;
+            break outer;
+          }
+        }
+      }
+    }
+    return polys;
   }
 
   function createPieceBody(x,y,w,h,shape){
@@ -168,15 +271,16 @@ const Physics = (() => {
     const triResult=triangulateDetailed(contour);
     const triangles=triResult.triangles;
     const triDiag=triResult.diag;
+    const convexPolys=triangles.length?convexDecompose(triangles):[];
     let body=null;
     let fallback=false;
 
-    if(triangles.length){
+    if(convexPolys.length){
       // IMPORTANT:
       // Do not pass image-space triangles directly as separate vertexSets to
       // Bodies.fromVertices(). In Matter.js each set is reoriented around its
       // own centre, which destroys the triangles' relative image-space offsets.
-      const parts=triangles.map(t=>makeTrianglePart(t,options));
+      const parts=convexPolys.map(poly=>makeConvexPart(poly,options));
 
       if(parts.length){
         // Build one rigid compound body.  Each part already has its position
@@ -210,13 +314,14 @@ const Physics = (() => {
     body.plugin.debugContours=shape&&shape.debugContours?shape.debugContours:[];
     body.plugin.debugContourVertexCount=shape&&shape.pointCount||0;
     body.plugin.debugTriangulatedCount=triangles.length;
+    body.plugin.debugConvexPartCount=convexPolys.length;
     body.plugin.debugTriangulation=triDiag;
     body.plugin.debugFallback=fallback;
     body.plugin.debugShapeReady=!fallback&&triangles.length>0;
     body.plugin.debugBodyCreated=true;
-    body.plugin.debugPartCentroids=triangles.map(t=>({
-      x:(t[0].x+t[1].x+t[2].x)/3,
-      y:(t[0].y+t[1].y+t[2].y)/3
+    body.plugin.debugPartCentroids=convexPolys.map(poly=>({
+      x:poly.reduce((sum,p)=>sum+p.x,0)/poly.length,
+      y:poly.reduce((sum,p)=>sum+p.y,0)/poly.length
     }));
     body.plugin.debugPartCount=body.parts&&body.parts.length>1?body.parts.length-1:body.parts.length;
     return body;
