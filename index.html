@@ -13,32 +13,32 @@
       <h1>ベビータワーバトル</h1>
       <p id="status">読み込み中…</p>
     </div>
-    <div class="score">
-      <span>P1 <b id="p1">0</b></span>
-      <span>P2 <b id="p2">0</b></span>
-    </div>
+    <div class="score"><span>スコア <b id="score">0</b></span></div>
   </header>
 
   <main class="game-wrap">
-    <canvas id="game"></canvas>
+    <div class="stage">
+      <canvas id="game"></canvas>
+      <div id="debug" class="debug" aria-live="polite"></div>
+      <div id="gameover" class="overlay hidden">
+        <div class="panel">
+          <h2>ゲーム終了</h2>
+          <p id="result"></p>
+          <p id="resultDetail"></p>
+          <button id="restart" type="button">もう一度</button>
+        </div>
+      </div>
+    </div>
+
     <div class="rotate-controls" aria-label="回転操作">
       <button id="rotateLeft" type="button" aria-label="左に回転">↺</button>
       <span>回転</span>
       <button id="rotateRight" type="button" aria-label="右に回転">↻</button>
     </div>
-
-    <div id="gameover" class="overlay hidden">
-      <div class="panel">
-        <h2>ゲーム終了</h2>
-        <p id="result"></p>
-        <p id="resultDetail"></p>
-        <button id="restart" type="button">もう一度</button>
-      </div>
-    </div>
   </main>
 
   <footer>
-    <span>ピースを左右に動かして、タップを離すと落下します。↺↻で回転。</span>
+    <span>ピースを左右に動かして、タップを離すと落下。↺↻で回転。</span>
     <button id="reset" type="button">リセット</button>
   </footer>
 </div>
