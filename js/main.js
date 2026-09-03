@@ -1,4 +1,4 @@
-/* v19 - bootstrap */
+/* v20 - bootstrap */
 (async()=>{
   try{
     await Game.init();
@@ -14,6 +14,6 @@
     }
     requestAnimationFrame(loop);
   }catch(e){
-    console.error("JinSanTowerGame v19:",e);
+    console.error("JinSanTowerGame v20:",e);
   }
 })();

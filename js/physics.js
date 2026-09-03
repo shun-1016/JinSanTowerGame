@@ -1,4 +1,4 @@
-/* v19 - preserve triangle positions in a Matter.js compound body */
+/* v20 - triangulation diagnostics build; physics geometry behavior unchanged */
 const Physics = (() => {
   const {Engine,World,Bodies,Body,Sleeping}=Matter;
   const engine=Engine.create({enableSleeping:true,positionIterations:12,velocityIterations:10,constraintIterations:4});
@@ -33,20 +33,67 @@ const Physics = (() => {
   function samePoint(a,b){return Math.hypot(a.x-b.x,a.y-b.y)<1e-6;}
 
   // Complete ear clipping. A partial result is never passed to Matter.js.
-  function triangulate(input){
-    if(!input||input.length<3)return [];
+  function segmentsIntersect(a,b,c,d){
+    const ab1=cross(a,b,c),ab2=cross(a,b,d),cd1=cross(c,d,a),cd2=cross(c,d,b);
+    const eps=1e-9;
+    const on=(p,q,r)=>Math.abs(cross(p,q,r))<=eps &&
+      p.x>=Math.min(q.x,r.x)-eps&&p.x<=Math.max(q.x,r.x)+eps&&
+      p.y>=Math.min(q.y,r.y)-eps&&p.y<=Math.max(q.y,r.y)+eps;
+    if((ab1>eps&&ab2<-eps || ab1<-eps&&ab2>eps) &&
+       (cd1>eps&&cd2<-eps || cd1<-eps&&cd2>eps)) return true;
+    return on(c,a,b)||on(d,a,b)||on(a,c,d)||on(b,c,d);
+  }
+
+  function hasSelfIntersection(poly){
+    const n=poly.length;
+    for(let i=0;i<n;i++){
+      const a=poly[i],b=poly[(i+1)%n];
+      for(let j=i+1;j<n;j++){
+        if(j===i || (j+1)%n===i || (i+1)%n===j) continue;
+        const c=poly[j],d=poly[(j+1)%n];
+        if(segmentsIntersect(a,b,c,d)) return {yes:true,edgeA:i,edgeB:j};
+      }
+    }
+    return {yes:false,edgeA:-1,edgeB:-1};
+  }
+
+  function triangulateDetailed(input){
+    const diag={
+      inputCount:input?input.length:0,
+      cleanCount:0,
+      area:0,
+      winding:'-',
+      selfIntersection:false,
+      selfIntersectionEdges:null,
+      triangles:0,
+      failed:false,
+      failReason:'NONE',
+      failIteration:-1,
+      remainingVertices:0
+    };
+    if(!input||input.length<3){diag.failed=true;diag.failReason='TOO_FEW_POINTS';return {triangles:[],diag};}
     const poly=[];
     for(const p of input){
       if(!poly.length||!samePoint(poly[poly.length-1],p)) poly.push({x:p.x,y:p.y});
     }
     if(poly.length>=2&&samePoint(poly[0],poly[poly.length-1]))poly.pop();
-    if(poly.length<3)return [];
-    if(area(poly)<0)poly.reverse();
+    diag.cleanCount=poly.length;
+    if(poly.length<3){diag.failed=true;diag.failReason='TOO_FEW_CLEAN_POINTS';return {triangles:[],diag};}
+    diag.area=area(poly);
+    diag.winding=diag.area>0?'CCW':(diag.area<0?'CW':'ZERO');
+    const si=hasSelfIntersection(poly);
+    diag.selfIntersection=si.yes;
+    diag.selfIntersectionEdges=si.yes?`${si.edgeA}/${si.edgeB}`:null;
+    if(Math.abs(diag.area)<0.05){diag.failed=true;diag.failReason='ZERO_AREA';return {triangles:[],diag};}
+    if(diag.area<0){poly.reverse();diag.area=-diag.area;diag.winding='CCW';}
 
     const indices=poly.map((_,i)=>i),triangles=[];
     let guard=0;
     while(indices.length>3){
-      if(guard++>poly.length*poly.length*4)return [];
+      if(guard++>poly.length*poly.length*4){
+        diag.failed=true;diag.failReason='GUARD_LIMIT';diag.failIteration=guard;diag.remainingVertices=indices.length;
+        return {triangles:[],diag};
+      }
       let earFound=false;
       for(let i=0;i<indices.length;i++){
         const ia=indices[(i-1+indices.length)%indices.length],ib=indices[i],ic=indices[(i+1)%indices.length];
@@ -63,10 +110,26 @@ const Physics = (() => {
         earFound=true;
         break;
       }
-      if(!earFound)return [];
+      if(!earFound){
+        diag.failed=true;
+        diag.failReason='NO_EAR_FOUND';
+        diag.failIteration=guard;
+        diag.remainingVertices=indices.length;
+        return {triangles:[],diag};
+      }
     }
     if(indices.length===3)triangles.push([poly[indices[0]],poly[indices[1]],poly[indices[2]]]);
-    return triangles.filter(t=>Math.abs(area(t))>0.05);
+    const valid=triangles.filter(t=>Math.abs(area(t))>0.05);
+    diag.triangles=valid.length;
+    if(valid.length!==triangles.length){
+      diag.failed=true;diag.failReason='DEGENERATE_TRIANGLE';diag.remainingVertices=indices.length;
+      return {triangles:[],diag};
+    }
+    return {triangles:valid,diag};
+  }
+
+  function triangulate(input){
+    return triangulateDetailed(input).triangles;
   }
 
   function makeTrianglePart(triangle,options){
@@ -94,7 +157,9 @@ const Physics = (() => {
       sleepThreshold:40
     };
     const contour=shape&&shape.contour;
-    const triangles=triangulate(contour);
+    const triResult=triangulateDetailed(contour);
+    const triangles=triResult.triangles;
+    const triDiag=triResult.diag;
     let body=null;
     let fallback=false;
 
@@ -137,6 +202,7 @@ const Physics = (() => {
     body.plugin.debugContours=shape&&shape.debugContours?shape.debugContours:[];
     body.plugin.debugContourVertexCount=shape&&shape.pointCount||0;
     body.plugin.debugTriangulatedCount=triangles.length;
+    body.plugin.debugTriangulation=triDiag;
     body.plugin.debugFallback=fallback;
     body.plugin.debugShapeReady=!fallback&&triangles.length>0;
     body.plugin.debugBodyCreated=true;

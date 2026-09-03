@@ -1,4 +1,4 @@
-/* v19 - Canvas renderer with optional debug diagnostics */
+/* v20 - Canvas renderer with optional triangulation diagnostics */
 const Renderer = (() => {
   const canvas=document.getElementById('gameCanvas');
   const ctx=canvas.getContext('2d');
@@ -173,9 +173,16 @@ const Renderer = (() => {
       partDy=first.position.y-b.position.y;
     }
 
+    const td=plugin.debugTriangulation||{};
+    const si=td.selfIntersection?'YES':'NO';
+    const edge=td.selfIntersectionEdges?` (${td.selfIntersectionEdges})`:'';
     debugEl.innerHTML=
       `輪郭解析: ${idx}.png　輪郭頂点: ${contourPts}<br>`+
-      `DEBUG: ON　${plugin.debugFixedPiece?"04.png固定":"通常順番(01→21)"}　(通常: ?debug=off)<br>`+
+      `DEBUG: ON　${plugin.debugFixedPiece?"固定":"通常順番(01→21)"}　(通常: ?debug=off)<br>`+
+      `簡略化後: ${td.cleanCount??'-'}　面積: ${Number(td.area??0).toFixed(2)}　`+
+      `自己交差: ${si}${edge}<br>`+
+      `三角形化: ${td.failed?'FAIL':'OK'}　理由: ${td.failReason||'-'}　`+
+      `失敗時残頂点: ${td.remainingVertices??'-'}<br>`+
       `物理三角形: ${actualTris}　物理頂点: ${actualVerts}　`+
       `Body: ${bodyOk?'OK':'NG'}　Fallback: ${fallback?'YES':'NO'}<br>`+
       `COM Local: x=${com.x.toFixed(2)}, y=${com.y.toFixed(2)}　`+
