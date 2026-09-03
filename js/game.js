@@ -69,6 +69,14 @@ const Game = (() => {
     spawn();
   }
 
+  // Camera behavior:
+  // Keep the base/tower in its original position at first.
+  // Only start raising the viewpoint after the tower becomes high enough
+  // that its top reaches this trigger line. Once triggered, keep following
+  // the tower upward without ever moving the camera back down.
+  const CAMERA_TRIGGER=0.45; // tower top must reach 45% of the stage height
+  const CAMERA_TOP=0.25;     // after following, keep tower top around 25%
+
   function update(dt){
     Physics.step(dt);
 
@@ -77,8 +85,16 @@ const Game = (() => {
       for(const p of pieces){
         top=Math.min(top,p.body.position.y-p.h/2);
       }
-      const target=Math.max(0,top-stageH*0.30);
-      cameraY += (target-cameraY)*Math.min(1,dt*5);
+
+      const triggerY=stageH*CAMERA_TRIGGER;
+      if(top < triggerY){
+        const target=Math.max(0,top-stageH*CAMERA_TOP);
+        // Follow upward only. Do not move the camera downward when pieces
+        // settle or when the tower top temporarily drops.
+        if(target>cameraY){
+          cameraY += (target-cameraY)*Math.min(1,dt*5);
+        }
+      }
     }
   }
 
