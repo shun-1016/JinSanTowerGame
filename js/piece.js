@@ -1,4 +1,4 @@
-/* v18.4 - automatic alpha-contour analysis */
+/* v18.6 - automatic alpha-contour analysis */
 const Piece = (() => {
   const MAX_PIECE = 82;
   const ALPHA_THRESHOLD = 32;

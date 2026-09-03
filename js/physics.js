@@ -1,4 +1,4 @@
-/* v18.4 - preserve triangle positions in a Matter.js compound body */
+/* v18.6 - preserve triangle positions in a Matter.js compound body */
 const Physics = (() => {
   const {Engine,World,Bodies,Body,Sleeping}=Matter;
   const engine=Engine.create({enableSleeping:true,positionIterations:12,velocityIterations:10,constraintIterations:4});

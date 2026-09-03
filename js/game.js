@@ -1,4 +1,4 @@
-/* v18.4 - solo game / stable standby input / single-piece shape diagnosis */
+/* v18.6 - solo game / stable standby input / single-piece transform diagnosis */
 const Game = (() => {
   let images=[];
   let pieces=[];

@@ -1,4 +1,4 @@
-/* v18.4 - Canvas renderer with contour vs actual Matter.js diagnostics */
+/* v18.6 - Canvas renderer with exact Matter part / image coordinate diagnostics */
 const Renderer = (() => {
   const canvas=document.getElementById('gameCanvas');
   const ctx=canvas.getContext('2d');
@@ -72,24 +72,66 @@ const Renderer = (() => {
     ctx.restore();
   }
 
-  function drawPartCentroids(body,cameraY){
-    const list=body.plugin&&body.plugin.debugPartCentroids||[];
-    if(!list.length) return;
-    const angle=body.angle||0;
+  function rotateLocal(x,y,angle){
     const c=Math.cos(angle),s=Math.sin(angle);
-    const off=(body.plugin&&body.plugin.imageVisualOffset)||{x:0,y:0};
+    return {x:x*c-y*s,y:x*s+y*c};
+  }
+
+  function drawPartCentroids(body,cameraY){
+    // v18.6: yellow markers are the ACTUAL Matter.js part.position values,
+    // not the originally stored triangle centroids. This lets us verify
+    // whether Matter preserved the intended local geometry.
+    const parts=getCollisionParts(body);
+    if(!parts.length) return;
     ctx.save();
     ctx.fillStyle='rgba(255,190,0,1)';
     ctx.strokeStyle='rgba(90,55,0,1)';
     ctx.lineWidth=1;
-    for(const p of list){
-      const x=body.position.x+off.x+(p.x*c-p.y*s);
-      const y=body.position.y+off.y+(p.x*s+p.y*c)-cameraY;
+    for(const part of parts){
+      const dx=part.position.x-body.position.x;
+      const dy=part.position.y-body.position.y;
+      // part.position is already in world space and therefore rotates with
+      // the body. Draw it directly rather than applying the body angle again.
+      const x=part.position.x;
+      const y=part.position.y-cameraY;
       ctx.beginPath();
       ctx.arc(x,y,3.2,0,Math.PI*2);
       ctx.fill();
       ctx.stroke();
     }
+    ctx.restore();
+  }
+
+  function drawImageCenterMarker(body,cameraY){
+    // White cross = the actual image centre in world space after applying
+    // the same visual offset used by drawImage(). If this separates from the
+    // blue contour centre/expected geometry during rotation, the bug is in
+    // the image-vs-COM transform rather than the collision geometry.
+    const off=(body.plugin&&body.plugin.imageVisualOffset)||{x:0,y:0};
+    const r=rotateLocal(off.x,off.y,body.angle);
+    const x=body.position.x+r.x;
+    const y=body.position.y+r.y-cameraY;
+    ctx.save();
+    ctx.strokeStyle='rgba(255,255,255,0.95)';
+    ctx.lineWidth=2;
+    ctx.beginPath();ctx.moveTo(x-7,y);ctx.lineTo(x+7,y);ctx.moveTo(x,y-7);ctx.lineTo(x,y+7);ctx.stroke();
+    ctx.strokeStyle='rgba(0,0,0,0.9)';
+    ctx.lineWidth=1;
+    ctx.beginPath();ctx.arc(x,y,2.5,0,Math.PI*2);ctx.stroke();
+    ctx.restore();
+  }
+
+  function drawExpectedImageCenter(body,cameraY){
+    // Cyan square = image centre at the point implied by the contour's
+    // coordinate system (0,0). This is intentionally separate from the
+    // white marker so the two can be compared during rotation.
+    const off=(body.plugin&&body.plugin.imageVisualOffset)||{x:0,y:0};
+    const r=rotateLocal(off.x,off.y,body.angle);
+    const x=body.position.x+r.x;
+    const y=body.position.y+r.y-cameraY;
+    ctx.save();
+    ctx.strokeStyle='rgba(0,220,220,1)';ctx.lineWidth=1.5;
+    ctx.strokeRect(x-5,y-5,10,10);
     ctx.restore();
   }
 
@@ -101,6 +143,8 @@ const Renderer = (() => {
     if(contours.length) drawLocalContour(b,contours,cameraY);
     drawActualPhysics(b,cameraY);
     drawPartCentroids(b,cameraY);
+    drawImageCenterMarker(b,cameraY);
+    drawExpectedImageCenter(b,cameraY);
   }
 
   function updateDebugPanel(p){
@@ -115,14 +159,25 @@ const Renderer = (() => {
     const bodyOk=plugin.debugBodyCreated===true;
     const fallback=plugin.debugFallback===true;
     const com=(plugin.debugCompoundCOMLocal||{x:0,y:0});
+    const angleDeg=(b.angle*180/Math.PI);
+    const partsForDiag=getCollisionParts(b);
+    let partDx=0,partDy=0;
+    if(partsForDiag.length){
+      const first=partsForDiag[0];
+      partDx=first.position.x-b.position.x;
+      partDy=first.position.y-b.position.y;
+    }
 
     debugEl.innerHTML=
       `輪郭解析: ${idx}.png　輪郭頂点: ${contourPts}<br>`+
       `DEBUG: 04.png固定　(通常順番へ戻す: ?debug=off)<br>`+
       `物理三角形: ${actualTris}　物理頂点: ${actualVerts}　`+
       `Body: ${bodyOk?'OK':'NG'}　Fallback: ${fallback?'YES':'NO'}<br>`+
-      `COM Offset: x=${off.x.toFixed(1)}, y=${off.y.toFixed(1)}　`+
-      `Body: x=${b.position.x.toFixed(1)}, y=${b.position.y.toFixed(1)}`;
+      `COM Local: x=${com.x.toFixed(2)}, y=${com.y.toFixed(2)}　`+
+      `Image Offset: x=${off.x.toFixed(2)}, y=${off.y.toFixed(2)}<br>`+
+      `Body: x=${b.position.x.toFixed(1)}, y=${b.position.y.toFixed(1)}　`+
+      `Angle: ${angleDeg.toFixed(1)}°<br>`+
+      `First Part Δ: x=${partDx.toFixed(2)}, y=${partDy.toFixed(2)}`;
   }
 
   function drawPiece(p,cameraY){
