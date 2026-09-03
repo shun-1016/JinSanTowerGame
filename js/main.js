@@ -1,8 +1,9 @@
-/* v17.4 bootstrap */
+/* v17.5 - bootstrap */
 (async()=>{
   try{
     await Game.init();
     Input.bind(Game);
+
     let last=performance.now();
     function loop(now){
       const dt=Math.min(0.033,(now-last)/1000);
@@ -13,6 +14,6 @@
     }
     requestAnimationFrame(loop);
   }catch(e){
-    console.error("JinSanTowerGame v17.4 init error:",e);
+    console.error("JinSanTowerGame v17.5:",e);
   }
 })();
