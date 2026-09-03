@@ -1,4 +1,4 @@
-/* v17.7 - solo game */
+/* v17.8 - solo game */
 const Game = (() => {
   let images=[];
   let pieces=[];
@@ -43,12 +43,13 @@ const Game = (() => {
     Physics.hold(p.body,x,y,0);
   }
 
-  function moveCurrentTo(clientX,clientY){
+  function moveCurrentTo(clientX){
     if(!current || current.dropped || !ready) return;
     const r=Renderer.canvas.getBoundingClientRect();
     const x=Math.max(current.w/2,Math.min(stageW-current.w/2,clientX-r.left));
-    const y=Math.max(cameraY+35,Math.min(cameraY+stageH*0.42,clientY-r.top+cameraY));
-    Physics.move(current.body,x,y);
+    // Keep the standby piece at exactly its existing Y position.
+    // Horizontal movement must never introduce a vertical offset.
+    Physics.move(current.body,x,current.body.position.y);
   }
 
   function rotate(delta){
@@ -74,46 +75,41 @@ const Game = (() => {
   }
 
   // Camera behavior:
-  // Only SETTLED pieces are used for camera tracking. A dropped piece is
-  // intentionally ignored while it is falling, because it starts near the
-  // top of the screen and must never pull the camera toward itself.
-  //
-  // Until the tower itself becomes tall enough, cameraY stays exactly 0.
-  // Once the highest placed piece reaches the trigger height, the camera
-  // starts following upward and never moves downward.
-  const CAMERA_TRIGGER=0.55; // tower height must exceed 55% of stage height
+  // Keep the camera fixed until the settled tower itself reaches the
+  // trigger line on screen. Once it crosses that line, move the camera
+  // upward so the tower top stays around CAMERA_TOP of the viewport.
+  // The calculation is intentionally done in screen coordinates:
+  // screenY = worldY - cameraY. This avoids reversing the camera direction.
+  const CAMERA_TRIGGER=0.45; // start following when tower top reaches 45%
   const CAMERA_TOP=0.30;     // after triggering, keep tower top around 30%
-  const CAMERA_SMOOTH=7;
+  const CAMERA_SMOOTH=8;
 
   function updateCamera(){
     if(!pieces.length) return;
 
-    // Highest point of PLACED pieces in world coordinates. Do not include
-    // `current`, because the current piece is the next standby piece.
     let towerTop=Infinity;
     let settledCount=0;
     for(const p of pieces){
-      // Matter.js marks bodies as sleeping after they have come to rest.
-      // Falling/settling pieces must not influence camera movement.
+      // Do not let a currently falling body pull the camera.
       if(!p.body.isSleeping) continue;
       towerTop=Math.min(towerTop,p.body.bounds.min.y);
       settledCount++;
     }
     if(!settledCount) return;
 
-    // Ground is fixed in world coordinates. The tower height is therefore
-    // independent of the current camera position.
-    const groundY=stageH-12;
-    const towerHeight=groundY-towerTop;
-    const triggerHeight=stageH*CAMERA_TRIGGER;
+    // Convert the highest settled point into the current viewport position.
+    const screenTop=towerTop-cameraY;
+    const triggerY=stageH*CAMERA_TRIGGER;
+    if(screenTop>=triggerY) return;
 
-    if(towerHeight <= triggerHeight) return;
+    // Because screenY = worldY - cameraY, increasing cameraY moves the
+    // tower upward on screen. The desired camera position is therefore:
+    // towerTop - desiredScreenY.
+    const targetCamera=Math.max(0,towerTop-stageH*CAMERA_TOP);
+    if(targetCamera<=cameraY) return;
 
-    // Once triggered, place the tower top near CAMERA_TOP of the viewport.
-    const target=Math.max(0,towerTop-stageH*CAMERA_TOP);
-    if(target>cameraY){
-      cameraY += (target-cameraY)*Math.min(1,1-Math.exp(-CAMERA_SMOOTH/60));
-    }
+    cameraY += (targetCamera-cameraY)*Math.min(1,1-Math.exp(-CAMERA_SMOOTH/60));
+    if(targetCamera-cameraY<0.2) cameraY=targetCamera;
   }
 
   function update(dt){
