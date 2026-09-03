@@ -1,9 +1,10 @@
-/* v18.1 - Canvas renderer with alpha-contour debug overlay */
+/* v18.2 - Canvas renderer with alpha-contour debug overlay */
 const Renderer = (() => {
   const canvas=document.getElementById('gameCanvas');
   const ctx=canvas.getContext('2d');
   let width=0,height=0,dpr=1;
   const DEBUG_SHAPE=true;
+  const debugEl=document.getElementById('shapeDebug');
 
   function resize(){
     const r=canvas.getBoundingClientRect(); width=r.width; height=r.height;
@@ -18,23 +19,32 @@ const Renderer = (() => {
   function drawDebugShape(p,cameraY){
     if(!DEBUG_SHAPE) return;
     const b=p.body, contours=b.plugin&&b.plugin.debugContours;
-    if(!contours||!contours.length) return;
+    if(!contours||!contours.length){
+      if(debugEl) debugEl.textContent='輪郭解析: 失敗（矩形フォールバック）';
+      return;
+    }
     const off=(b.plugin&&b.plugin.imageVisualOffset)||{x:0,y:0};
     ctx.save();
     ctx.translate(b.position.x+off.x,b.position.y-cameraY+off.y);
     ctx.rotate(b.angle);
-    ctx.strokeStyle='rgba(0,120,255,0.9)';
-    ctx.fillStyle='rgba(0,120,255,0.18)';
-    ctx.lineWidth=0.8;
+    ctx.strokeStyle='rgba(255,0,0,0.95)';
+    ctx.fillStyle='rgba(255,0,0,0.10)';
+    ctx.lineWidth=1.5;
     for(const poly of contours){
       if(poly.length<3) continue;
       ctx.beginPath();
       ctx.moveTo(poly[0].x,poly[0].y);
       for(let i=1;i<poly.length;i++) ctx.lineTo(poly[i].x,poly[i].y);
       ctx.closePath(); ctx.fill(); ctx.stroke();
-      for(const q of poly){ctx.beginPath();ctx.arc(q.x,q.y,0.9,0,Math.PI*2);ctx.fill();}
+      for(const q of poly){ctx.beginPath();ctx.arc(q.x,q.y,1.4,0,Math.PI*2);ctx.fill();}
     }
     ctx.restore();
+    if(debugEl){
+      const idx=String((p.index||0)+1).padStart(2,'0');
+      const pts=(b.plugin&&b.plugin.debugPointCount)||0;
+      const tris=(b.plugin&&b.plugin.debugTriangleCount)||0;
+      debugEl.textContent=`輪郭解析: ${idx}.png / 頂点 ${pts} / 三角形 ${tris}`;
+    }
   }
 
   function drawPiece(p,cameraY){
