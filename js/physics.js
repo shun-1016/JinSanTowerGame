@@ -1,7 +1,15 @@
-/* v20.1 - triangulation diagnostics build; physics geometry behavior unchanged */
+/* v20.2 - triangulation diagnostics build; physics geometry behavior unchanged */
 const Physics = (() => {
   const {Engine,World,Bodies,Body,Sleeping}=Matter;
-  const engine=Engine.create({enableSleeping:true,positionIterations:12,velocityIterations:10,constraintIterations:4});
+  const engine=Engine.create({
+    // v20.2: stability test. Slightly reduce solver iterations so repeated
+    // contact corrections do not amplify tiny motions in large compound bodies.
+    // Sleeping remains enabled and the sleep threshold is lowered below.
+    enableSleeping:true,
+    positionIterations:10,
+    velocityIterations:8,
+    constraintIterations:2
+  });
   engine.gravity.x=0;engine.gravity.y=1;engine.gravity.scale=0.001;
   const world=engine.world;
   let ground=null;
@@ -151,10 +159,10 @@ const Physics = (() => {
       label:'piece',
       friction:0.82,
       frictionStatic:0.95,
-      frictionAir:0.004,
+      frictionAir:0.008,
       restitution:0.01,
       density:0.002,
-      sleepThreshold:40
+      sleepThreshold:20
     };
     const contour=shape&&shape.contour;
     const triResult=triangulateDetailed(contour);
@@ -237,6 +245,10 @@ const Physics = (() => {
     Body.rotate(body,delta);
     Sleeping.set(body,true);
   }
-  function step(dt){Engine.update(engine,Math.max(1,Math.min(33,dt*1000)));}
+  function step(dt){
+    // Keep the existing frame-time clamp; only the solver/sleep parameters
+    // differ from v20.1 in this diagnostic build.
+    Engine.update(engine,Math.max(1,Math.min(33,dt*1000)));
+  }
   return {engine,world,setup,createPieceBody,add,hold,release,move,rotate,step};
 })();

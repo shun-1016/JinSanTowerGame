@@ -1,4 +1,4 @@
-/* v20.1 - automatic alpha-contour analysis / triangulation diagnostics */
+/* v20.2 - automatic alpha-contour analysis / triangulation diagnostics */
 const Piece = (() => {
   const MAX_PIECE = 82;
   const ALPHA_THRESHOLD = 32;

@@ -1,4 +1,4 @@
-/* v20.1 - solo game / optional debug mode / normal piece sequence */
+/* v20.2 - solo game / optional debug mode / normal piece sequence */
 const Game = (() => {
   let images=[];
   let pieces=[];

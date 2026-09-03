@@ -1,4 +1,4 @@
-/* v20.1 - Canvas renderer with optional triangulation diagnostics */
+/* v20.2 - Canvas renderer with optional triangulation diagnostics */
 const Renderer = (() => {
   const canvas=document.getElementById('gameCanvas');
   const ctx=canvas.getContext('2d');
