@@ -1,4 +1,4 @@
-/* Piece model */
+/* Piece model - Matter.js v17.1 */
 (function () {
   const MAX_PIECE = 82;
   const Piece = {
