@@ -25,12 +25,13 @@ const ANGULAR_DAMPING=0.985;
 const REST_ANGULAR=0.18;
 const SLEEP_ANGULAR=0.24;
 const SLEEP_LINEAR=8;
-const SETTLE_TIME=3.0;
-const SHAKE_TIME=3.0;
+const MIN_OBSERVE_TIME=0.8;
+const NORMAL_FIX_TIME=1.2;
+const MAX_OBSERVE_TIME=2.0;
 const SHAKE_X_RANGE=12;
 const SHAKE_Y_RANGE=10;
 const SHAKE_ANGLE_RANGE=4*Math.PI/180;
-const SHAKE_MAX_SAMPLES=240;
+const SHAKE_MAX_SAMPLES=180;
 const SUPPORT_GRACE=0.18;
 const UNSTABLE_VX=SLEEP_LINEAR*3;
 const UNSTABLE_VA=SLEEP_ANGULAR*3;
@@ -247,56 +248,50 @@ function update(dt){
     }
 
     if(current.supported){
-      // ここでは「毎フレーム許容範囲内」を要求しない。
-      // 接地した瞬間から3秒間、実際の揺れをそのまま記録する。
+      // 接地後は「静止しきるまで待つ」のではなく、一定時間だけ観測して
+      // その中央値をゲーム上の確定位置として採用する。
       current.shakeTimer+=dt;
       current.shakeSamples.push({x:current.x,y:current.y,a:current.a});
       if(current.shakeSamples.length>SHAKE_MAX_SAMPLES)current.shakeSamples.shift();
 
+      const median=(arr)=>{const v=[...arr].sort((a,b)=>a-b);const m=Math.floor(v.length/2);return v.length%2?v[m]:(v[m-1]+v[m])/2};
+      const firstThird=current.shakeSamples.slice(0,Math.max(1,Math.floor(current.shakeSamples.length/3)));
+      const lastThird=current.shakeSamples.slice(Math.floor(current.shakeSamples.length*2/3));
+      const xs=current.shakeSamples.map(v=>v.x),ys=current.shakeSamples.map(v=>v.y),as=current.shakeSamples.map(v=>v.a);
+      const driftX=median(lastThird.map(v=>v.x))-median(firstThird.map(v=>v.x));
+      const driftY=median(lastThird.map(v=>v.y))-median(firstThird.map(v=>v.y));
+      const driftA=median(lastThird.map(v=>v.a))-median(firstThird.map(v=>v.a));
       const clearlyUnstable=Math.abs(current.vx)>UNSTABLE_VX||Math.abs(current.va)>UNSTABLE_VA;
-      if(clearlyUnstable){
-        current.shakeTimer=0;
-        current.shakeSamples=[];
+
+      // 大きく動き続けている間だけ観測をやり直す。
+      // 小さな揺れや一時的な外れ値ではタイマーをリセットしない。
+      if(clearlyUnstable&&current.shakeTimer<MAX_OBSERVE_TIME){
+        current.shakeTimer=Math.max(0,current.shakeTimer-dt*.5);
       }
 
-      if(current.shakeTimer>=SHAKE_TIME&&current.shakeSamples.length>=2){
-        const median=(arr)=>{const v=[...arr].sort((a,b)=>a-b);const m=Math.floor(v.length/2);return v.length%2?v[m]:(v[m-1]+v[m])/2};
-        const percentile=(arr,q)=>{const v=[...arr].sort((a,b)=>a-b),i=(v.length-1)*q,lo=Math.floor(i),hi=Math.ceil(i);return lo===hi?v[lo]:v[lo]+(v[hi]-v[lo])*(i-lo)};
-        const firstThird=current.shakeSamples.slice(0,Math.max(1,Math.floor(current.shakeSamples.length/3)));
-        const lastThird=current.shakeSamples.slice(Math.floor(current.shakeSamples.length*2/3));
-        const xs=current.shakeSamples.map(v=>v.x),ys=current.shakeSamples.map(v=>v.y),as=current.shakeSamples.map(v=>v.a);
-        const robustRangeX=percentile(xs,.90)-percentile(xs,.10);
-        const robustRangeY=percentile(ys,.90)-percentile(ys,.10);
-        const robustRangeA=percentile(as,.90)-percentile(as,.10);
-        const driftX=median(lastThird.map(v=>v.x))-median(firstThird.map(v=>v.x));
-        const driftY=median(lastThird.map(v=>v.y))-median(firstThird.map(v=>v.y));
-        const driftA=median(lastThird.map(v=>v.a))-median(firstThird.map(v=>v.a));
-        const stableRange=robustRangeX<=SHAKE_X_RANGE&&robustRangeY<=SHAKE_Y_RANGE&&robustRangeA<=SHAKE_ANGLE_RANGE;
-        const stableDrift=Math.abs(driftX)<=SHAKE_X_RANGE*.5&&Math.abs(driftY)<=SHAKE_Y_RANGE*.5&&Math.abs(driftA)<=SHAKE_ANGLE_RANGE*.5;
+      // 1.2秒以降は通常固定。2秒に達したら、多少揺れていても必ず固定する。
+      const enoughForNormalFix=current.shakeTimer>=NORMAL_FIX_TIME&&current.shakeSamples.length>=4;
+      const forceFix=current.shakeTimer>=MAX_OBSERVE_TIME&&current.shakeSamples.length>=4;
 
-        // 数フレームの外れ値ではなく、3秒間全体の「揺れ幅」と「ドリフト」で判定。
-        // 条件を満たせば、揺れていた範囲の中央値へ強制的に収束させる。
-        if(stableRange&&stableDrift){
-          const mx=median(xs),my=median(ys),ma=median(as);
-          current.x=mx;current.y=my;current.a=ma;
-          for(let pass=0;pass<3;pass++){
-            let corrected=false;
-            for(const p of pieces){const hit=satPieces(current,p);if(hit){
-              // 固定直前は角度を変えず、位置だけ押し戻す。
-              const n=hit.ax,depth=Math.min(hit.depth,MAX_PUSH);current.x-=n.x*depth;current.y-=n.y*depth;corrected=true;
-            }}
-            const ground=resolveGround(current,0);if(ground)corrected=true;
-            if(!corrected)break;
-          }
-          current.vx=0;current.vy=0;current.va=0;current.a=ma;
-          current.sleepReason="SLEEP: 3s observation / median";
-          pieces.push(current);current=null;updateCamera();score++;scoreEl.textContent=String(score);turnLockedUntil=now+TURN_DELAY;
-          statusEl.textContent="次のピース";
-        }else{
-          // 3秒観測した結果、まだ明確なドリフト/大きな揺れなら再観測する。
-          current.shakeTimer=0;
-          current.shakeSamples=[];
+      if(enoughForNormalFix||forceFix){
+        const mx=median(xs),my=median(ys),ma=median(as);
+        current.x=mx;current.y=my;current.a=ma;
+
+        // 固定直前は角度を変えず、位置だけ最小限押し戻す。
+        for(let pass=0;pass<3;pass++){
+          let corrected=false;
+          for(const p of pieces){const hit=satPieces(current,p);if(hit){
+            const n=hit.ax,depth=Math.min(hit.depth,MAX_PUSH);current.x-=n.x*depth;current.y-=n.y*depth;corrected=true;
+          }}
+          const ground=resolveGround(current,0);if(ground)corrected=true;
+          if(!corrected)break;
         }
+        current.vx=0;current.vy=0;current.va=0;current.a=ma;
+        current.sleepReason=forceFix
+          ? "SLEEP: 2.0s max observation / median"
+          : "SLEEP: 1.2s observation / median";
+        pieces.push(current);current=null;updateCamera();score++;scoreEl.textContent=String(score);turnLockedUntil=now+TURN_DELAY;
+        statusEl.textContent="次のピース";
       }
     }else{
       current.settle=0;
@@ -321,11 +316,11 @@ function drawDebug(){
     `x ${c.x.toFixed(1)}  y ${c.y.toFixed(1)}`,
     `角度 ${deg}°  角速度 ${va}°/s`,
     `vx ${c.vx.toFixed(2)}  vy ${c.vy.toFixed(2)}`,
-    `静止候補 ${c.settle.toFixed(2)}s / 揺れ判定 ${c.shakeTimer.toFixed(2)} / ${SHAKE_TIME.toFixed(2)}s`,
-    `観測: 3秒 / 許容ロバスト幅 X${SHAKE_X_RANGE} Y${SHAKE_Y_RANGE} 角度${(SHAKE_ANGLE_RANGE*180/Math.PI).toFixed(1)}°`,
+    `観測 ${c.shakeTimer.toFixed(2)}s / 通常固定 ${NORMAL_FIX_TIME.toFixed(2)}s / 強制固定 ${MAX_OBSERVE_TIME.toFixed(2)}s`,
+    `観測方式: 0.8秒以上で判定開始・1.2秒で通常固定・2.0秒で強制固定 / 中央値を採用`,
     `支点: ${c.contactKey||"-"}  normal ${n}`,
     `接触点: ${point}`,
-    `判定: 明確な不安定 |vx|>${UNSTABLE_VX} / |va|>${UNSTABLE_VA.toFixed(2)} なら再観測`,
+    `判定: 明確な不安定 |vx|>${UNSTABLE_VX} / |va|>${UNSTABLE_VA.toFixed(2)} の場合のみ観測を少し延長`,
     `パーツ数: ${c.parts.length}`
   ].join("\n")
 }
