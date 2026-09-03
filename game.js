@@ -25,8 +25,10 @@ const AIR = 0.996;
 const BOUNCE = 0.02;
 const LINEAR_FRICTION = 0.82;
 const ANGULAR_DAMPING = 0.985;
-const REST_ANGULAR = 0.10;
-const SETTLE_TIME = 0.38;
+const REST_ANGULAR = 0.18;
+const SLEEP_ANGULAR = 0.24;
+const SLEEP_LINEAR = 8;
+const SETTLE_TIME = 0.30;
 const TURN_DELAY = 450;
 const ROTATE_STEP = Math.PI / 12;
 const MAX_PUSH = 12;
@@ -400,13 +402,20 @@ function update(dt){
       current.vy=0;
       current.vx*=Math.pow(0.45,dt);
       current.va*=Math.pow(TORQUE_DAMPING,dt*60);
+
+      // 着地後の微小な数値振動を吸収する。
+      // ここを厳しくしすぎると「頂点で支えたまま倒れない」ため、
+      // 一定時間だけ低速状態が続いた場合にのみ静止状態へ遷移させる。
       if(Math.abs(current.vx)<4)current.vx=0;
-      if(Math.abs(current.va)<REST_ANGULAR)current.va*=0.75;
-      const stable=Math.abs(current.vx)<6 && Math.abs(current.va)<REST_ANGULAR;
-      if(stable)current.settle+=dt;else current.settle=0;
+      if(Math.abs(current.va)<REST_ANGULAR)current.va*=0.45;
+
+      const calm=Math.abs(current.vx)<SLEEP_LINEAR && Math.abs(current.va)<SLEEP_ANGULAR;
+      if(calm)current.settle+=dt;else current.settle=0;
     }else current.settle=0;
 
-    if(current.supported && current.settle>=SETTLE_TIME && Math.abs(current.va)<REST_ANGULAR){
+    // 一定時間ほぼ動いていない場合は、物理演算上の「静止」として確定する。
+    // これにより特定形状で発生する±数px/数度程度の永久振動を防ぐ。
+    if(current.supported && current.settle>=SETTLE_TIME){
       current.vx=0;current.vy=0;current.va=0;
       pieces.push(current);
       current=null;
