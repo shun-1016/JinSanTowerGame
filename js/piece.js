@@ -1,4 +1,4 @@
-/* v20 - automatic alpha-contour analysis / triangulation diagnostics */
+/* v20.1 - automatic alpha-contour analysis / triangulation diagnostics */
 const Piece = (() => {
   const MAX_PIECE = 82;
   const ALPHA_THRESHOLD = 32;
@@ -80,13 +80,18 @@ const Piece = (() => {
     const solid=new Uint8Array(pw*ph);
     for(let i=0;i<solid.length;i++) solid[i]=alpha[i*4+3]>=ALPHA_THRESHOLD?1:0;
 
-    const edges=new Map();
+    // Build every boundary edge explicitly. Each solid pixel contributes
+    // only the sides that touch transparent/outside pixels.
+    const outgoing=new Map();
+    const edges=[];
     const key=(x,y)=>`${x},${y}`;
     const add=(x1,y1,x2,y2)=>{
+      const e={a:{x:x1,y:y1},b:{x:x2,y:y2},used:false};
+      edges.push(e);
       const k=key(x1,y1);
-      let list=edges.get(k);
-      if(!list){list=[];edges.set(k,list);}
-      list.push({x:x2,y:y2});
+      let list=outgoing.get(k);
+      if(!list){list=[];outgoing.set(k,list);}
+      list.push(e);
     };
     for(let y=0;y<ph;y++) for(let x=0;x<pw;x++){
       if(!solid[y*pw+x]) continue;
@@ -96,28 +101,58 @@ const Piece = (() => {
       if(x===0||!solid[y*pw+x-1]) add(x,y+1,x,y);
     }
 
+    // At ordinary pixel corners there is one continuation. At ambiguous
+    // touching corners there can be several. Pick the continuation that
+    // keeps the filled region on the same side of the boundary. This is a
+    // deterministic planar-edge walk and avoids the old arbitrary pop().
+    function chooseNext(cur,prev){
+      const list=outgoing.get(key(cur.x,cur.y))||[];
+      const candidates=list.filter(e=>!e.used);
+      if(!candidates.length) return null;
+      if(!prev) return candidates[0];
+
+      const dx=cur.x-prev.x,dy=cur.y-prev.y;
+      let best=null,bestScore=Infinity;
+      for(const e of candidates){
+        const ex=e.b.x-cur.x,ey=e.b.y-cur.y;
+        // Angle measured clockwise in screen coordinates. Straight=0,
+        // right turn=pi/2. Prefer the smallest clockwise turn; a U-turn
+        // is last resort and is normally excluded by the used-edge state.
+        let turn=Math.atan2(ey,ex)-Math.atan2(dy,dx);
+        while(turn<0) turn+=Math.PI*2;
+        // Screen coordinates invert the usual visual clockwise convention.
+        turn=(Math.PI*2-turn)%(Math.PI*2);
+        if(turn<bestScore){bestScore=turn;best=e;}
+      }
+      return best;
+    }
+
     const loops=[];
-    const takeNext=(from)=>{
-      const list=edges.get(key(from.x,from.y));
-      return list&&list.length?list.pop():null;
-    };
-    for(const [k,list] of Array.from(edges.entries())){
-      while(list.length){
-        const [sx,sy]=k.split(',').map(Number);
-        const start={x:sx,y:sy};
-        const loop=[start];
-        let cur=start,closed=false,guard=0;
-        while(guard++<pw*ph*4){
-          const n=takeNext(cur);
-          if(!n) break;
-          cur=n;
-          if(cur.x===start.x&&cur.y===start.y){closed=true;break;}
-          loop.push(cur);
-        }
-        if(closed&&loop.length>=4){
-          let clean=simplifyCollinear(loop);
-          if(clean.length>100) clean=simplifyClosed(clean,0.55);
-          if(clean.length>=3) loops.push(clean.map(p=>({x:p.x-pw/2,y:p.y-ph/2})));
+    for(const first of edges){
+      if(first.used) continue;
+      const start={x:first.a.x,y:first.a.y};
+      const loop=[start];
+      let prev=start,cur={x:first.b.x,y:first.b.y};
+      first.used=true;
+      let closed=false,guard=0;
+      while(guard++<edges.length+10){
+        if(cur.x===start.x&&cur.y===start.y){closed=true;break;}
+        loop.push(cur);
+        const next=chooseNext(cur,prev);
+        if(!next) break;
+        next.used=true;
+        prev=cur;
+        cur={x:next.b.x,y:next.b.y};
+      }
+      if(closed&&loop.length>=4){
+        let clean=simplifyCollinear(loop);
+        // Keep the existing contour simplification threshold, but only
+        // simplify a valid closed loop. The topology must be established
+        // before RDP is applied.
+        if(clean.length>100) clean=simplifyClosed(clean,0.55);
+        if(clean.length>=3){
+          const normalized=clean.map(p=>({x:p.x-pw/2,y:p.y-ph/2}));
+          if(Math.abs(polygonArea(normalized))>0.05) loops.push(normalized);
         }
       }
     }
