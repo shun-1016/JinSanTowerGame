@@ -10,24 +10,25 @@
 <body>
   <header class="header">
     <h1>JinSan Tower Game</h1>
-    <div class="headerRight"><span id="version">v17.3</span><span id="score">Score: 0</span></div>
+    <div class="headerRight">
+      <span id="version">v17.4</span>
+      <span id="score">Score: 0</span>
+    </div>
   </header>
 
   <main>
     <div class="stage">
       <canvas id="gameCanvas"></canvas>
     </div>
-
     <div class="controls">
       <button id="rotateLeft" type="button">↶</button>
       <button id="drop" type="button">落とす</button>
       <button id="rotateRight" type="button">↷</button>
     </div>
-
     <div id="debug" class="debug" hidden></div>
   </main>
 
-  <script src="https://cdn.jsdelivr.net/npm/matter-js@0.20.0/build/matter.min.js"></script>
+  <script src="lib/matter.min.js"></script>
   <script src="js/physics.js"></script>
   <script src="js/piece.js"></script>
   <script src="js/renderer.js"></script>

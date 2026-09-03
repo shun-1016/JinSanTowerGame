@@ -1,29 +1,13 @@
-# JinSanTowerGame v17
+# JinSanTowerGame v17.4
 
-Matter.js移行用の新しいフォルダ構成です。
+Matter.js移行版。
 
-## 構成
+### v17.4
+- 初期ピースを画像ロード完了後に必ず生成・表示するよう再構成
+- Matter.js BodyをWorldへ追加してからStatic待機状態にする
+- 落下ボタンでStatic解除 + Sleep解除
+- iPhone SEを含むスマホ向けレスポンシブヘッダー
+- ヘッダーにバージョン情報を表示
+- PC/タブレット対応は対象外
 
-- `index.html` : HTML / 読み込み順
-- `style.css` : UI / Canvasレイアウト
-- `js/main.js` : 起動・ゲームループ
-- `js/game.js` : ゲームルール
-- `js/physics.js` : Matter.js物理処理
-- `js/piece.js` : ピース定義
-- `js/renderer.js` : Canvas描画
-- `js/input.js` : 入力処理
-- Matter.js 0.20.0 : jsDelivr CDNから読み込み（GitHub Pagesでそのまま動作）
-- `assets/01.png` ～ `21.png` : 既存の加工済み画像
-
-## 注意
-
-v17では既存の `assets` フォルダはそのまま利用します。
-このZIPには画像素材は含めていません。
-
-Matter.js本体は `lib/matter.min.js` に配置しています。
-
-
-## v17.3
-- 初期ピースをMatter.js Worldへ登録してから静的Preview化するよう修正。
-- 初期表示直後にCanvasを再描画。
-- ヘッダー右側にv17.3を表示。
+既存の `assets/01.png` ～ `21.png` を使用します。
