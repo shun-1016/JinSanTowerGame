@@ -1,7 +1,8 @@
-/* Game rules - Matter.js v17.1 */
+/* Game rules - Matter.js v17.3 */
 (function () {
   const { Body } = Matter;
   const Game = {
+    version: 'v17.3',
     pieces: [], current: null, queue: [], score: 0, gameEnded: false, cameraY: 0,
 
     async init() {
@@ -16,11 +17,19 @@
       const x = Renderer.width / 2;
       const y = this.cameraY + 70;
       this.current = Piece.create(data, x, y);
+      // Preview bodies are inserted into the world first, then made static.
+      // This keeps the compound body fully registered and guarantees that the
+      // preview is rendered before the first drop.
+      Physics.add(this.current.body);
       Body.setStatic(this.current.body, true);
       Body.setSleeping(this.current.body, false);
+      Body.setPosition(this.current.body, { x, y });
+      Body.setVelocity(this.current.body, { x: 0, y: 0 });
+      Body.setAngularVelocity(this.current.body, 0);
       this.current.falling = false;
-      Physics.add(this.current.body);
+      this.current.fixed = false;
       this.updateCamera();
+      Renderer.draw(this);
     },
 
     rotate(dir) {
@@ -38,6 +47,7 @@
       // This is the critical fix for v17: a preview body must not remain asleep.
       Body.setStatic(p.body, false);
       Body.setSleeping(p.body, false);
+      Body.setVelocity(p.body, { x: 0, y: 0 });
       Body.setVelocity(p.body, { x: 0, y: 2 });
       Body.setAngularVelocity(p.body, 0);
       p.falling = true;
