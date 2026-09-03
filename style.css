@@ -11,3 +11,5 @@ main{height:calc(100vh - 54px);display:flex;flex-direction:column}
 .controls button{height:48px;min-width:72px;border:1px solid #bbb;border-radius:10px;background:#fafafa;font-size:20px}
 .controls #drop{min-width:110px;font-size:16px;font-weight:700}
 .debug{position:absolute;left:8px;top:8px;z-index:10;padding:7px 9px;background:rgba(255,255,255,.86);font:11px/1.45 monospace;border:1px solid #ccc;border-radius:6px;pointer-events:none}
+
+.headerRight{display:flex;align-items:center;gap:14px}.headerRight #version{font-size:12px;color:#666;font-weight:600}
