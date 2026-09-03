@@ -1,12 +1,11 @@
-/* v20.4 - landing stability build; geometry/image synchronization unchanged */
+/* v20.5 - final landing stability tuning; geometry/image synchronization unchanged */
 const Physics = (() => {
   const {Engine,World,Bodies,Body,Sleeping}=Matter;
   const engine=Engine.create({
-    // v20.3: stability test. Slightly reduce solver iterations so repeated
-    // contact corrections do not amplify tiny motions in large compound bodies.
-    // Sleeping remains enabled and the sleep threshold is lowered below.
+    // v20.5: final stability tuning. Keep enough position iterations to
+    // resolve stacked contacts cleanly, while damping tiny residual motion.
     enableSleeping:true,
-    positionIterations:10,
+    positionIterations:12,
     velocityIterations:8,
     constraintIterations:2
   });
@@ -262,7 +261,7 @@ const Physics = (() => {
       label:'piece',
       friction:0.82,
       frictionStatic:0.95,
-      frictionAir:0.012,
+      frictionAir:0.014,
       restitution:0,
       density:0.002,
       sleepThreshold:20
@@ -381,9 +380,9 @@ const Physics = (() => {
       }
       const speed=body.speed||0;
       const angularSpeed=body.angularSpeed||0;
-      if(speed<0.018 && angularSpeed<0.0008){
+      if(speed<0.022 && angularSpeed<0.0010){
         body.plugin.settleFrames=(body.plugin.settleFrames||0)+1;
-        if(body.plugin.settleFrames>=8){
+        if(body.plugin.settleFrames>=6){
           Body.setVelocity(body,{x:0,y:0});
           Body.setAngularVelocity(body,0);
           Sleeping.set(body,true);
