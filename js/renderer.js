@@ -1,9 +1,9 @@
-/* v18.7 - Canvas renderer with corrected image/contour transform diagnostics */
+/* v19 - Canvas renderer with optional debug diagnostics */
 const Renderer = (() => {
   const canvas=document.getElementById('gameCanvas');
   const ctx=canvas.getContext('2d');
   let width=0,height=0,dpr=1;
-  const DEBUG_SHAPE=true;
+  const DEBUG_SHAPE=new URLSearchParams(location.search).get("debug")==="on";
   const debugEl=document.getElementById('shapeDebug');
 
   function resize(){
@@ -17,7 +17,7 @@ const Renderer = (() => {
   function clear(){ctx.clearRect(0,0,width,height);}
 
   function drawLocalContour(body,contours,cameraY){
-    // v18.7: use exactly the same transform order as drawPiece().
+    // v19: use exactly the same transform order as drawPiece().
     // Image rendering is: Body position -> rotate -> image-local offset.
     // The previous debug contour rendering was: Body position -> offset -> rotate,
     // which made the blue contour drift away from the actual image as the piece rotated.
@@ -83,7 +83,7 @@ const Renderer = (() => {
   }
 
   function drawPartCentroids(body,cameraY){
-    // v18.7: yellow markers are the ACTUAL Matter.js part.position values,
+    // v19: yellow markers are the ACTUAL Matter.js part.position values,
     // not the originally stored triangle centroids. This lets us verify
     // whether Matter preserved the intended local geometry.
     const parts=getCollisionParts(body);
@@ -175,7 +175,7 @@ const Renderer = (() => {
 
     debugEl.innerHTML=
       `輪郭解析: ${idx}.png　輪郭頂点: ${contourPts}<br>`+
-      `DEBUG: 04.png固定　(通常順番へ戻す: ?debug=off)<br>`+
+      `DEBUG: ON　${plugin.debugFixedPiece?"04.png固定":"通常順番(01→21)"}　(通常: ?debug=off)<br>`+
       `物理三角形: ${actualTris}　物理頂点: ${actualVerts}　`+
       `Body: ${bodyOk?'OK':'NG'}　Fallback: ${fallback?'YES':'NO'}<br>`+
       `COM Local: x=${com.x.toFixed(2)}, y=${com.y.toFixed(2)}　`+

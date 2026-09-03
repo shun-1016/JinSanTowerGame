@@ -1,4 +1,4 @@
-/* v18.7 - solo game / stable standby input / single-piece transform diagnosis */
+/* v19 - solo game / optional debug mode / normal piece sequence */
 const Game = (() => {
   let images=[];
   let pieces=[];
@@ -12,10 +12,16 @@ const Game = (() => {
   let spawnAt=0;
   const NEXT_PIECE_DELAY=500;
 
-  // v18.7 diagnostic mode: 04.png is the fixed test piece by default.
-  // Add ?debug=off to restore the normal 01.png -> 21.png sequence.
-  const DEBUG_SINGLE_PIECE=new URLSearchParams(location.search).get("debug")!=="off";
-  const DEBUG_PIECE_INDEX=3;
+  // v19: debug mode is opt-in via ?debug=on.
+  // In debug mode the normal 01.png -> 21.png sequence is kept so all pieces
+  // can be validated. For a fixed piece, optionally use ?debug=on&piece=04.
+  const params=new URLSearchParams(location.search);
+  const DEBUG_MODE=params.get("debug")==="on";
+  const debugPieceParam=params.get("piece");
+  const DEBUG_PIECE_INDEX=(debugPieceParam && /^\d{1,2}$/.test(debugPieceParam))
+    ? Math.max(0,Math.min(20,parseInt(debugPieceParam,10)-1))
+    : null;
+  const DEBUG_SINGLE_PIECE=DEBUG_MODE && DEBUG_PIECE_INDEX!==null;
 
   const status=document.getElementById("status");
 
@@ -43,6 +49,8 @@ const Game = (() => {
     const y=cameraY+Math.max(60,Math.min(100,stageH*0.18));
     const spawnIndex=DEBUG_SINGLE_PIECE?DEBUG_PIECE_INDEX:nextIndex;
     const p=Piece.create(spawnIndex,images,x,y);
+    p.body.plugin=p.body.plugin||{};
+    p.body.plugin.debugFixedPiece=DEBUG_SINGLE_PIECE;
     if(!DEBUG_SINGLE_PIECE) nextIndex=(nextIndex+1)%images.length;
     current=p;
     Physics.add(p.body);
