@@ -1,9 +1,11 @@
-/* v17.8 - mobile input: horizontal-only standby movement */
+/* v17.9 - mobile input: horizontal-only standby movement */
 const Input = (() => {
   let dragging=false;
   let pointerId=null;
   let startX=0;
   let startY=0;
+  let startPieceX=0;
+  let startPieceY=0;
   let draggingHorizontally=false;
   const MOVE_THRESHOLD=8;
 
@@ -17,8 +19,11 @@ const Input = (() => {
       pointerId=e.pointerId;
       startX=e.clientX;
       startY=e.clientY;
+      // Capture the exact body position at pointerdown. A tap must not cause
+      // even a tiny position jump, and vertical input is never applied.
+      startPieceX=game.current.body.position.x;
+      startPieceY=game.current.body.position.y;
       canvas.setPointerCapture(pointerId);
-      // Do not move the piece on tap. Its initial position remains unchanged.
     });
 
     canvas.addEventListener("pointermove",e=>{
@@ -35,8 +40,10 @@ const Input = (() => {
         draggingHorizontally=true;
       }
 
-      // Only X is passed to Game. Y is deliberately ignored.
-      game.moveCurrentTo(e.clientX);
+      // Preserve the grab offset so the piece does not jump horizontally
+      // when the finger touches somewhere inside the image. Y is fixed to
+      // the exact pointerdown position for the entire gesture.
+      game.moveCurrentTo(e.clientX, startX, startPieceX, startPieceY);
     });
 
     const end=e=>{

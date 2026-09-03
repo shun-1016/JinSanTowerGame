@@ -1,4 +1,4 @@
-/* v17.8 - solo game */
+/* v17.10 - solo game / stable standby input */
 const Game = (() => {
   let images=[];
   let pieces=[];
@@ -25,8 +25,14 @@ const Game = (() => {
     stageW=width; stageH=height;
     Physics.setup(stageW,stageH-12);
     if(current && !current.dropped){
-      const x=Math.max(20,Math.min(stageW-20,current.body.position.x));
-      Physics.hold(current.body,x,Math.max(65,current.h/2+18),current.body.angle);
+      // iOS Safari may fire resize while the browser chrome changes during a
+      // touch. Never reset the standby piece's Y position here. That caused
+      // the piece to jump vertically on the first tap. Only clamp X if the
+      // viewport became narrower.
+      const x=Math.max(current.w/2,Math.min(stageW-current.w/2,current.body.position.x));
+      if(Math.abs(x-current.body.position.x)>0.01){
+        Physics.move(current.body,x,current.body.position.y);
+      }
     }
   }
 
@@ -43,13 +49,17 @@ const Game = (() => {
     Physics.hold(p.body,x,y,0);
   }
 
-  function moveCurrentTo(clientX){
+  function moveCurrentTo(clientX, pointerStartX, pieceStartX, pieceStartY){
     if(!current || current.dropped || !ready) return;
     const r=Renderer.canvas.getBoundingClientRect();
-    const x=Math.max(current.w/2,Math.min(stageW-current.w/2,clientX-r.left));
-    // Keep the standby piece at exactly its existing Y position.
-    // Horizontal movement must never introduce a vertical offset.
-    Physics.move(current.body,x,current.body.position.y);
+    const currentPointerX=clientX-r.left;
+    const startPointerX=pointerStartX-r.left;
+    // Move only by the finger's horizontal delta. This preserves the exact
+    // initial X grab offset and prevents a first-touch jump.
+    const x=Math.max(current.w/2,Math.min(stageW-current.w/2,
+      pieceStartX+(currentPointerX-startPointerX)));
+    // Y is intentionally locked to the pointerdown position.
+    Physics.move(current.body,x,pieceStartY);
   }
 
   function rotate(delta){
@@ -75,13 +85,16 @@ const Game = (() => {
   }
 
   // Camera behavior:
-  // Keep the camera fixed until the settled tower itself reaches the
-  // trigger line on screen. Once it crosses that line, move the camera
-  // upward so the tower top stays around CAMERA_TOP of the viewport.
-  // The calculation is intentionally done in screen coordinates:
-  // screenY = worldY - cameraY. This avoids reversing the camera direction.
-  const CAMERA_TRIGGER=0.45; // start following when tower top reaches 45%
-  const CAMERA_TOP=0.30;     // after triggering, keep tower top around 30%
+  // The canvas uses screenY = worldY - cameraY. Therefore, when the tower
+  // grows upward (towerTop gets smaller), cameraY must become NEGATIVE so
+  // the whole world, including the ground, moves DOWN on screen.
+  //
+  // Keep the camera fixed until the settled tower top reaches 45% of the
+  // viewport. After that, keep the tower top around the same 45% line while
+  // allowing cameraY to go negative. This makes the base move downward and
+  // eventually disappear instead of creating a gap below it.
+  const CAMERA_TRIGGER=0.45;
+  const CAMERA_TARGET=0.45;
   const CAMERA_SMOOTH=8;
 
   function updateCamera(){
@@ -102,14 +115,16 @@ const Game = (() => {
     const triggerY=stageH*CAMERA_TRIGGER;
     if(screenTop>=triggerY) return;
 
-    // Because screenY = worldY - cameraY, increasing cameraY moves the
-    // tower upward on screen. The desired camera position is therefore:
-    // towerTop - desiredScreenY.
-    const targetCamera=Math.max(0,towerTop-stageH*CAMERA_TOP);
-    if(targetCamera<=cameraY) return;
+    // IMPORTANT: cameraY is allowed to become negative. With
+    // screenY = worldY - cameraY, a negative cameraY moves the world DOWN.
+    // That is the required direction for this game: as the tower grows,
+    // the base should move below the viewport rather than leaving a gap
+    // underneath it.
+    const targetCamera=towerTop-stageH*CAMERA_TARGET;
+    if(targetCamera>=cameraY) return;
 
     cameraY += (targetCamera-cameraY)*Math.min(1,1-Math.exp(-CAMERA_SMOOTH/60));
-    if(targetCamera-cameraY<0.2) cameraY=targetCamera;
+    if(Math.abs(targetCamera-cameraY)<0.2) cameraY=targetCamera;
   }
 
   function update(dt){
