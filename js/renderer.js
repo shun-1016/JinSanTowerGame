@@ -1,4 +1,4 @@
-/* v17.7 - Canvas renderer */
+/* v17.5 - Canvas renderer */
 const Renderer = (() => {
   const canvas=document.getElementById("gameCanvas");
   const ctx=canvas.getContext("2d");
@@ -23,7 +23,8 @@ const Renderer = (() => {
     ctx.save();
     ctx.translate(b.position.x,b.position.y-cameraY);
     ctx.rotate(b.angle);
-    ctx.drawImage(p.im,-p.w/2,-p.h/2,p.w,p.h);
+    const off=(b.plugin&&b.plugin.imageVisualOffset)||{x:0,y:0};
+    ctx.drawImage(p.im,off.x-p.w/2,off.y-p.h/2,p.w,p.h);
     ctx.restore();
   }
 
