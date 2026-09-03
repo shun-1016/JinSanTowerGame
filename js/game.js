@@ -1,93 +1,96 @@
-/* Game rules - Matter.js v17.3 */
-(function () {
-  const { Body } = Matter;
-  const Game = {
-    version: 'v17.3',
-    pieces: [], current: null, queue: [], score: 0, gameEnded: false, cameraY: 0,
+/* v17.4 solo game */
+const Game = (() => {
+  const W0=390;
+  let pieces=[];
+  let current=null;
+  let nextIndex=0;
+  let score=0;
+  let cameraY=0;
+  let stageW=390, stageH=500;
+  const GROUND_MARGIN=12;
 
-    async init() {
-      this.pieces = []; this.queue = []; this.score = 0; this.gameEnded = false; this.cameraY = 0;
-      for (let i = 1; i <= 21; i++) this.queue.push(await Piece.load(i));
-      this.spawn();
-    },
-
-    spawn() {
-      if (!this.queue.length) { this.gameEnded = true; return; }
-      const data = this.queue.shift();
-      const x = Renderer.width / 2;
-      const y = this.cameraY + 70;
-      this.current = Piece.create(data, x, y);
-      // Preview bodies are inserted into the world first, then made static.
-      // This keeps the compound body fully registered and guarantees that the
-      // preview is rendered before the first drop.
-      Physics.add(this.current.body);
-      Body.setStatic(this.current.body, true);
-      Body.setSleeping(this.current.body, false);
-      Body.setPosition(this.current.body, { x, y });
-      Body.setVelocity(this.current.body, { x: 0, y: 0 });
-      Body.setAngularVelocity(this.current.body, 0);
-      this.current.falling = false;
-      this.current.fixed = false;
-      this.updateCamera();
-      Renderer.draw(this);
-    },
-
-    rotate(dir) {
-      const p = this.current;
-      if (!p || p.falling || this.gameEnded) return;
-      Body.rotate(p.body, dir * Math.PI / 12);
-      Body.setSleeping(p.body, false);
-    },
-
-    drop() {
-      const p = this.current;
-      if (!p || p.falling || this.gameEnded) return;
-
-      // Explicitly wake the body after changing it from static to dynamic.
-      // This is the critical fix for v17: a preview body must not remain asleep.
-      Body.setStatic(p.body, false);
-      Body.setSleeping(p.body, false);
-      Body.setVelocity(p.body, { x: 0, y: 0 });
-      Body.setVelocity(p.body, { x: 0, y: 2 });
-      Body.setAngularVelocity(p.body, 0);
-      p.falling = true;
-    },
-
-    update() {
-      if (this.current && this.current.falling) {
-        const b = this.current.body;
-        if (b.isSleeping) this.fixCurrent();
-
-        // Horizontal play area. Only clamp when the body actually exceeds it.
-        if (this.current) {
-          const half = this.current.width / 2;
-          if (b.position.x < half) Body.setPosition(b, { x: half, y: b.position.y });
-          if (b.position.x > Renderer.width - half) Body.setPosition(b, { x: Renderer.width - half, y: b.position.y });
-        }
-      }
-      this.updateCamera();
-    },
-
-    fixCurrent() {
-      const p = this.current;
-      if (!p) return;
-      Body.setSleeping(p.body, true);
-      p.fixed = true; p.falling = false;
-      this.pieces.push(p); this.current = null; this.score++;
-      document.getElementById('score').textContent = `Score: ${this.score}`;
-      if (this.queue.length) this.spawn(); else this.gameEnded = true;
-    },
-
-    updateCamera() {
-      const all = this.pieces.concat(this.current ? [this.current] : []);
-      if (!all.length) { this.cameraY = 0; Renderer.cameraY = 0; return; }
-      let top = Infinity;
-      for (const p of all) top = Math.min(top, p.body.bounds.min.y);
-      const target = Math.max(100, Renderer.height * 0.25);
-      const desired = Math.max(0, target - top);
-      this.cameraY += (desired - this.cameraY) * 0.08;
-      Renderer.cameraY = this.cameraY;
+  function layout() {
+    const r=Renderer.canvas.getBoundingClientRect();
+    stageW=r.width; stageH=r.height;
+    const groundY=stageH-GROUND_MARGIN;
+    Physics.resetGround(stageW/2, groundY+20, Math.max(900,stageW*3));
+    if(current && !current.dropped) {
+      const x=Math.max(25,Math.min(stageW-25,current.body.position.x));
+      Physics.hold(current.body,x,Math.max(55,current.h/2+28));
     }
-  };
-  window.Game = Game;
+  }
+
+  async function spawn() {
+    if(nextIndex>=21) nextIndex=0;
+    const x=stageW/2, y=Math.max(55, current ? current.h/2+28 : 70);
+    try {
+      const p=await Piece.create(nextIndex++,x,y);
+      current=p;
+      Physics.add(p.body);
+      Physics.hold(p.body,x,y);
+      render();
+    } catch(e) {
+      console.error("piece load failed",e);
+    }
+  }
+
+  function moveCurrentTo(clientX,clientY) {
+    if(!current || current.dropped) return;
+    const rect=Renderer.canvas.getBoundingClientRect();
+    const x=Math.max(15,Math.min(stageW-15,clientX-rect.left));
+    const y=Math.max(35,Math.min(stageH*0.45,clientY-rect.top+cameraY));
+    Matter.Body.setPosition(current.body,{x,y});
+  }
+
+  function rotate(a) {
+    if(!current || current.dropped) return;
+    Physics.rotate(current.body,a);
+  }
+
+  function drop() {
+    if(!current || current.dropped) return;
+    current.dropped=true;
+    Physics.wake(current.body);
+    current.body.position.y += 1;
+    current.body.velocity.y = 0;
+    score++;
+    document.getElementById("score").textContent=`Score: ${score}`;
+    spawn();
+  }
+
+  function update(dt) {
+    // Do not let a newly spawned piece fall: it is static until drop().
+    Physics.step(dt);
+    // Basic camera follow after the stack rises.
+    if(pieces.length) {
+      let minY=Infinity;
+      for(const p of pieces) minY=Math.min(minY,p.body.position.y-p.h/2);
+      cameraY=Math.max(0,minY-stageH*0.28);
+    }
+    // Move dropped current into settled collection once it sleeps.
+    for(const p of pieces) {}
+    if(current && current.dropped && current.body.isSleeping) {
+      pieces.push(current);
+      current=null;
+      spawn();
+    }
+  }
+
+  function render() {
+    const {w,h}=Renderer.resize();
+    stageW=w; stageH=h;
+    Renderer.clear(w,h);
+    for(const p of pieces) Renderer.drawPiece(p,cameraY);
+    if(current) Renderer.drawPiece(current,cameraY);
+    Renderer.drawGround(h-GROUND_MARGIN,cameraY,w);
+  }
+
+  async function init() {
+    layout();
+    // Load first image before starting animation, so the initial piece is visible.
+    await spawn();
+    window.addEventListener("resize",()=>{layout();render();});
+  }
+
+  return {init,update,render,moveCurrentTo,rotate,drop,get current(){return current;}};
 })();
