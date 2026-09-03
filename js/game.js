@@ -1,4 +1,4 @@
-/* v18.2 - solo game / stable standby input */
+/* v18.3 - solo game / stable standby input */
 const Game = (() => {
   let images=[];
   let pieces=[];
@@ -25,10 +25,6 @@ const Game = (() => {
     stageW=width; stageH=height;
     Physics.setup(stageW,stageH-12);
     if(current && !current.dropped){
-      // iOS Safari may fire resize while the browser chrome changes during a
-      // touch. Never reset the standby piece's Y position here. That caused
-      // the piece to jump vertically on the first tap. Only clamp X if the
-      // viewport became narrower.
       const x=Math.max(current.w/2,Math.min(stageW-current.w/2,current.body.position.x));
       if(Math.abs(x-current.body.position.x)>0.01){
         Physics.move(current.body,x,current.body.position.y);
@@ -39,8 +35,6 @@ const Game = (() => {
   function spawn(){
     if(!ready) return;
     const x=stageW/2;
-    // Spawn relative to the current camera, so the standby piece remains
-    // visible even after the camera has started following a tall tower.
     const y=cameraY+Math.max(60,Math.min(100,stageH*0.18));
     const p=Piece.create(nextIndex,images,x,y);
     nextIndex=(nextIndex+1)%images.length;
@@ -49,16 +43,13 @@ const Game = (() => {
     Physics.hold(p.body,x,y,0);
   }
 
-  function moveCurrentTo(clientX, pointerStartX, pieceStartX, pieceStartY){
+  function moveCurrentTo(clientX,pointerStartX,pieceStartX,pieceStartY){
     if(!current || current.dropped || !ready) return;
     const r=Renderer.canvas.getBoundingClientRect();
     const currentPointerX=clientX-r.left;
     const startPointerX=pointerStartX-r.left;
-    // Move only by the finger's horizontal delta. This preserves the exact
-    // initial X grab offset and prevents a first-touch jump.
     const x=Math.max(current.w/2,Math.min(stageW-current.w/2,
       pieceStartX+(currentPointerX-startPointerX)));
-    // Y is intentionally locked to the pointerdown position.
     Physics.move(current.body,x,pieceStartY);
   }
 
@@ -78,21 +69,9 @@ const Game = (() => {
 
     score++;
     document.getElementById("score").textContent=`Score: ${score}`;
-
-    // Wait briefly before rendering the next standby piece. This prevents
-    // the newly created body from overlapping the still-falling piece.
     spawnAt=performance.now()+NEXT_PIECE_DELAY;
   }
 
-  // Camera behavior:
-  // The canvas uses screenY = worldY - cameraY. Therefore, when the tower
-  // grows upward (towerTop gets smaller), cameraY must become NEGATIVE so
-  // the whole world, including the ground, moves DOWN on screen.
-  //
-  // Keep the camera fixed until the settled tower top reaches 45% of the
-  // viewport. After that, keep the tower top around the same 45% line while
-  // allowing cameraY to go negative. This makes the base move downward and
-  // eventually disappear instead of creating a gap below it.
   const CAMERA_TRIGGER=0.45;
   const CAMERA_TARGET=0.45;
   const CAMERA_SMOOTH=8;
@@ -103,23 +82,16 @@ const Game = (() => {
     let towerTop=Infinity;
     let settledCount=0;
     for(const p of pieces){
-      // Do not let a currently falling body pull the camera.
       if(!p.body.isSleeping) continue;
       towerTop=Math.min(towerTop,p.body.bounds.min.y);
       settledCount++;
     }
     if(!settledCount) return;
 
-    // Convert the highest settled point into the current viewport position.
     const screenTop=towerTop-cameraY;
     const triggerY=stageH*CAMERA_TRIGGER;
     if(screenTop>=triggerY) return;
 
-    // IMPORTANT: cameraY is allowed to become negative. With
-    // screenY = worldY - cameraY, a negative cameraY moves the world DOWN.
-    // That is the required direction for this game: as the tower grows,
-    // the base should move below the viewport rather than leaving a gap
-    // underneath it.
     const targetCamera=towerTop-stageH*CAMERA_TARGET;
     if(targetCamera>=cameraY) return;
 
@@ -143,6 +115,10 @@ const Game = (() => {
     for(const p of pieces) Renderer.drawPiece(p,cameraY);
     if(current) Renderer.drawPiece(current,cameraY);
     Renderer.drawGround(stageH-12,cameraY);
+
+    // Keep one compact diagnostic record visible: current piece if present,
+    // otherwise the most recently dropped piece.
+    Renderer.renderDebugTarget(current,pieces);
   }
 
   async function init(){

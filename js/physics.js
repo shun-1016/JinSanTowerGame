@@ -1,6 +1,6 @@
-/* v18.2 - stable Matter.js body from automatically extracted alpha contour */
+/* v18.3 - physics body + actual Matter.js shape diagnostics */
 const Physics = (() => {
-  const {Engine,World,Bodies,Body,Sleeping,Vertices,Vector}=Matter;
+  const {Engine,World,Bodies,Body,Sleeping}=Matter;
   const engine=Engine.create({enableSleeping:true,positionIterations:12,velocityIterations:10,constraintIterations:4});
   engine.gravity.x=0;engine.gravity.y=1;engine.gravity.scale=0.001;
   const world=engine.world;
@@ -23,8 +23,7 @@ const Physics = (() => {
   }
   function samePoint(a,b){return Math.hypot(a.x-b.x,a.y-b.y)<1e-6;}
 
-  // Robust ear clipping. If the simplified contour cannot be fully triangulated,
-  // do NOT build a partial body; callers will use a safe fallback instead.
+  // Complete ear clipping. A partial result is never passed to Matter.js.
   function triangulate(input){
     if(!input||input.length<3)return [];
     const poly=[];
@@ -59,16 +58,15 @@ const Physics = (() => {
     const options={label:'piece',friction:0.82,frictionStatic:0.95,frictionAir:0.004,restitution:0.01,density:0.002,sleepThreshold:40};
     const contour=shape&&shape.contour;
     const triangles=triangulate(contour);
-    let body;
+    let body=null;
+    let fallback=false;
 
     if(triangles.length){
-      // fromVertices recentres the compound body from the supplied vertices.
-      // We immediately place it at the requested game coordinate, so the image
-      // and physical shape share the same world transform.
       body=Bodies.fromVertices(0,0,triangles,options,true,0.01,2,0.01);
       if(body){
-        // fromVertices recentres the compound body on the polygon centroid.
-        // Keep the image centre aligned with the original alpha-mask centre.
+        // Bodies.fromVertices recentres the compound body at its centre of mass.
+        // Save the local offset needed to keep the image centre aligned with the
+        // same geometry, then place the body at the requested game point.
         const visualOffset={x:-body.position.x,y:-body.position.y};
         Body.setPosition(body,{x,y});
         body.plugin=body.plugin||{};
@@ -78,18 +76,20 @@ const Physics = (() => {
 
     if(!body){
       body=Bodies.rectangle(x,y,Math.max(10,w),Math.max(10,h),options);
+      fallback=true;
       body.plugin=body.plugin||{};
       body.plugin.imageVisualOffset={x:0,y:0};
-      body.plugin.debugFallback=true;
     }
 
     body.plugin=body.plugin||{};
     body.plugin.imageWidth=w;
     body.plugin.imageHeight=h;
     body.plugin.debugContours=shape&&shape.debugContours?shape.debugContours:[];
-    body.plugin.debugTriangleCount=triangles.length;
-    body.plugin.debugPointCount=shape&&shape.pointCount||0;
-    body.plugin.debugShapeReady=triangles.length>0;
+    body.plugin.debugContourVertexCount=shape&&shape.pointCount||0;
+    body.plugin.debugTriangulatedCount=triangles.length;
+    body.plugin.debugFallback=fallback;
+    body.plugin.debugShapeReady=!fallback&&triangles.length>0;
+    body.plugin.debugBodyCreated=true;
     return body;
   }
 
@@ -98,9 +98,7 @@ const Physics = (() => {
     Body.setStatic(body,true);Body.setPosition(body,{x,y});Body.setAngle(body,angle);
     Body.setVelocity(body,{x:0,y:0});Body.setAngularVelocity(body,0);Sleeping.set(body,true);
   }
-  function release(body){
-    Body.setStatic(body,false);Sleeping.set(body,false);Body.setVelocity(body,{x:0,y:0.5});
-  }
+  function release(body){Body.setStatic(body,false);Sleeping.set(body,false);Body.setVelocity(body,{x:0,y:0.5});}
   function move(body,x,y){Body.setPosition(body,{x,y});Body.setVelocity(body,{x:0,y:0});Sleeping.set(body,true);}
   function rotate(body,delta){Body.rotate(body,delta);Sleeping.set(body,true);}
   function step(dt){Engine.update(engine,Math.max(1,Math.min(33,dt*1000)));}

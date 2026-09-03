@@ -1,4 +1,4 @@
-/* v18.2 - automatic alpha-contour analysis */
+/* v18.3 - automatic alpha-contour analysis */
 const Piece = (() => {
   const MAX_PIECE = 82;
   const ALPHA_THRESHOLD = 32;
@@ -28,8 +28,6 @@ const Piece = (() => {
     }
     return a/2;
   }
-
-  function cross(a,b,c){return (b.x-a.x)*(c.y-a.y)-(b.y-a.y)*(c.x-a.x);}
 
   function simplifyCollinear(points){
     if(points.length<4) return points;
@@ -127,7 +125,7 @@ const Piece = (() => {
     }
     if(!loops.length) return [];
     loops.sort((a,b)=>Math.abs(polygonArea(b))-Math.abs(polygonArea(a)));
-    return loops[0]; // Only the outer loop is used for physics; inner loops are holes.
+    return loops[0];
   }
 
   function analyzeShape(im,w,h){
