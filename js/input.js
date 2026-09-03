@@ -1,4 +1,4 @@
-/* v18.0 - mobile input: horizontal-only standby movement */
+/* v18.1 - mobile input: horizontal-only standby movement */
 const Input = (() => {
   let dragging=false;
   let pointerId=null;

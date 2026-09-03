@@ -1,4 +1,4 @@
-/* v18.0 - solo game / stable standby input */
+/* v18.1 - solo game / stable standby input */
 const Game = (() => {
   let images=[];
   let pieces=[];
