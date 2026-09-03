@@ -25,7 +25,12 @@ const ANGULAR_DAMPING=0.985;
 const REST_ANGULAR=0.18;
 const SLEEP_ANGULAR=0.24;
 const SLEEP_LINEAR=8;
-const SETTLE_TIME=0.30;
+const SETTLE_TIME=3.0;
+const SHAKE_TIME=3.0;
+const SHAKE_X_RANGE=5;
+const SHAKE_Y_RANGE=5;
+const SHAKE_ANGLE_RANGE=2*Math.PI/180;
+const SHAKE_MAX_SAMPLES=240;
 const TURN_DELAY=450;
 const ROTATE_STEP=Math.PI/12;
 const MAX_PUSH=12;
@@ -114,7 +119,7 @@ function spawn(){
   const id=queue.shift();
   if(id===undefined){endGame("使用できる画像がありません");return}
   const src=images[id],processed=processImage(src);
-  current={id,im:src,processed,x:W/2,y:cameraY+Math.max(45,processed.h/2+6),w:processed.w,h:processed.h,parts:processed.parts,a:0,vx:0,vy:0,va:0,falling:false,settle:0,supported:false,contactKey:null,lastSupport:null,sleepReason:""};
+  current={id,im:src,processed,x:W/2,y:cameraY+Math.max(45,processed.h/2+6),w:processed.w,h:processed.h,parts:processed.parts,a:0,vx:0,vy:0,va:0,falling:false,settle:0,supported:false,contactKey:null,lastSupport:null,sleepReason:"",shakeSamples:[],shakeTimer:0};
   acceptingInput=true; statusEl.textContent="ピースを配置";
 }
 function reset(){
@@ -228,10 +233,42 @@ function update(dt){
       if(Math.abs(current.vx)<4)current.vx=0;
       if(Math.abs(current.va)<REST_ANGULAR)current.va*=.45;
       const calm=Math.abs(current.vx)<SLEEP_LINEAR&&Math.abs(current.va)<SLEEP_ANGULAR;
-      if(calm)current.settle+=dt;else current.settle=0;
-      if(current.settle>=SETTLE_TIME){
-        current.vx=0;current.vy=0;current.va=0;current.a=Math.round(current.a/(Math.PI/180))*Math.PI/180;
-        current.sleepReason="SLEEP: calm "+SETTLE_TIME.toFixed(2)+"s";
+      if(calm){
+        current.settle+=dt;
+        current.shakeSamples.push({x:current.x,y:current.y,a:current.a});
+        if(current.shakeSamples.length>SHAKE_MAX_SAMPLES)current.shakeSamples.shift();
+      }else{
+        current.settle=0;
+        current.shakeSamples=[];
+      }
+
+      // 「ほぼ静止しているが微振動が続く」状態を検出する。
+      // 3秒間のX/Y/角度の振れ幅がすべて許容範囲内なら、中央値へ強制収束させる。
+      if(current.shakeSamples.length>=2){
+        const xs=current.shakeSamples.map(v=>v.x),ys=current.shakeSamples.map(v=>v.y),as=current.shakeSamples.map(v=>v.a);
+        const rangeX=Math.max(...xs)-Math.min(...xs);
+        const rangeY=Math.max(...ys)-Math.min(...ys);
+        const rangeA=Math.max(...as)-Math.min(...as);
+        const stableRange=rangeX<=SHAKE_X_RANGE&&rangeY<=SHAKE_Y_RANGE&&rangeA<=SHAKE_ANGLE_RANGE;
+        if(stableRange)current.shakeTimer+=dt;else{current.shakeTimer=0;current.shakeSamples=[{x:current.x,y:current.y,a:current.a}];}
+      }else current.shakeTimer=0;
+
+      if(current.shakeTimer>=SHAKE_TIME){
+        const median=(arr)=>{const v=[...arr].sort((a,b)=>a-b);const m=Math.floor(v.length/2);return v.length%2?v[m]:(v[m-1]+v[m])/2};
+        const mx=median(current.shakeSamples.map(v=>v.x));
+        const my=median(current.shakeSamples.map(v=>v.y));
+        const ma=median(current.shakeSamples.map(v=>v.a));
+        current.x=mx;current.y=my;current.a=ma;
+        // 中央値への移動でわずかなめり込みが発生した場合だけ、最後に物理的な押し戻しを行う。
+        for(let pass=0;pass<3;pass++){
+          let corrected=false;
+          for(const p of pieces){const hit=satPieces(current,p);if(hit){resolveCollision(current,p,hit,dt);corrected=true;}}
+          const ground=resolveGround(current,dt);if(ground)corrected=true;
+          if(!corrected)break;
+        }
+        current.vx=0;current.vy=0;current.va=0;
+        current.a=ma;
+        current.sleepReason="SLEEP: 3s shake range / median";
         pieces.push(current);current=null;updateCamera();score++;scoreEl.textContent=String(score);turnLockedUntil=now+TURN_DELAY;
         statusEl.textContent="次のピース";
       }
@@ -254,7 +291,8 @@ function drawDebug(){
     `x ${c.x.toFixed(1)}  y ${c.y.toFixed(1)}`,
     `角度 ${deg}°  角速度 ${va}°/s`,
     `vx ${c.vx.toFixed(2)}  vy ${c.vy.toFixed(2)}`,
-    `settle ${c.settle.toFixed(2)} / ${SETTLE_TIME.toFixed(2)}s`,
+    `静止候補 ${c.settle.toFixed(2)}s / 揺れ判定 ${c.shakeTimer.toFixed(2)} / ${SHAKE_TIME.toFixed(2)}s`,
+    `揺れ許容 X±${SHAKE_X_RANGE/2} Y±${SHAKE_Y_RANGE/2} 角度±${(SHAKE_ANGLE_RANGE*180/Math.PI/2).toFixed(1)}°`,
     `支点: ${c.contactKey||"-"}  normal ${n}`,
     `接触点: ${point}`,
     `判定: |vx|<${SLEEP_LINEAR} / |va|<${SLEEP_ANGULAR}`,
