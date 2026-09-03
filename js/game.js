@@ -1,4 +1,4 @@
-/* v17.5 - solo game */
+/* v17.7 - solo game */
 const Game = (() => {
   let images=[];
   let pieces=[];
@@ -9,6 +9,8 @@ const Game = (() => {
   let stageW=390;
   let stageH=500;
   let ready=false;
+  let spawnAt=0;
+  const NEXT_PIECE_DELAY=500;
 
   const status=document.getElementById("status");
 
@@ -31,7 +33,9 @@ const Game = (() => {
   function spawn(){
     if(!ready) return;
     const x=stageW/2;
-    const y=Math.max(60,Math.min(100,stageH*0.18));
+    // Spawn relative to the current camera, so the standby piece remains
+    // visible even after the camera has started following a tall tower.
+    const y=cameraY+Math.max(60,Math.min(100,stageH*0.18));
     const p=Piece.create(nextIndex,images,x,y);
     nextIndex=(nextIndex+1)%images.length;
     current=p;
@@ -43,7 +47,7 @@ const Game = (() => {
     if(!current || current.dropped || !ready) return;
     const r=Renderer.canvas.getBoundingClientRect();
     const x=Math.max(current.w/2,Math.min(stageW-current.w/2,clientX-r.left));
-    const y=Math.max(35,Math.min(stageH*0.42,clientY-r.top+cameraY));
+    const y=Math.max(cameraY+35,Math.min(cameraY+stageH*0.42,clientY-r.top+cameraY));
     Physics.move(current.body,x,y);
   }
 
@@ -64,38 +68,63 @@ const Game = (() => {
     score++;
     document.getElementById("score").textContent=`Score: ${score}`;
 
-    // Generate the next standby piece immediately, independent of the
-    // previous piece's sleeping state.
-    spawn();
+    // Wait briefly before rendering the next standby piece. This prevents
+    // the newly created body from overlapping the still-falling piece.
+    spawnAt=performance.now()+NEXT_PIECE_DELAY;
   }
 
   // Camera behavior:
-  // Keep the base/tower in its original position at first.
-  // Only start raising the viewpoint after the tower becomes high enough
-  // that its top reaches this trigger line. Once triggered, keep following
-  // the tower upward without ever moving the camera back down.
-  const CAMERA_TRIGGER=0.45; // tower top must reach 45% of the stage height
-  const CAMERA_TOP=0.25;     // after following, keep tower top around 25%
+  // Only SETTLED pieces are used for camera tracking. A dropped piece is
+  // intentionally ignored while it is falling, because it starts near the
+  // top of the screen and must never pull the camera toward itself.
+  //
+  // Until the tower itself becomes tall enough, cameraY stays exactly 0.
+  // Once the highest placed piece reaches the trigger height, the camera
+  // starts following upward and never moves downward.
+  const CAMERA_TRIGGER=0.55; // tower height must exceed 55% of stage height
+  const CAMERA_TOP=0.30;     // after triggering, keep tower top around 30%
+  const CAMERA_SMOOTH=7;
+
+  function updateCamera(){
+    if(!pieces.length) return;
+
+    // Highest point of PLACED pieces in world coordinates. Do not include
+    // `current`, because the current piece is the next standby piece.
+    let towerTop=Infinity;
+    let settledCount=0;
+    for(const p of pieces){
+      // Matter.js marks bodies as sleeping after they have come to rest.
+      // Falling/settling pieces must not influence camera movement.
+      if(!p.body.isSleeping) continue;
+      towerTop=Math.min(towerTop,p.body.bounds.min.y);
+      settledCount++;
+    }
+    if(!settledCount) return;
+
+    // Ground is fixed in world coordinates. The tower height is therefore
+    // independent of the current camera position.
+    const groundY=stageH-12;
+    const towerHeight=groundY-towerTop;
+    const triggerHeight=stageH*CAMERA_TRIGGER;
+
+    if(towerHeight <= triggerHeight) return;
+
+    // Once triggered, place the tower top near CAMERA_TOP of the viewport.
+    const target=Math.max(0,towerTop-stageH*CAMERA_TOP);
+    if(target>cameraY){
+      cameraY += (target-cameraY)*Math.min(1,1-Math.exp(-CAMERA_SMOOTH/60));
+    }
+  }
 
   function update(dt){
     Physics.step(dt);
 
-    if(pieces.length){
-      let top=Infinity;
-      for(const p of pieces){
-        top=Math.min(top,p.body.position.y-p.h/2);
-      }
-
-      const triggerY=stageH*CAMERA_TRIGGER;
-      if(top < triggerY){
-        const target=Math.max(0,top-stageH*CAMERA_TOP);
-        // Follow upward only. Do not move the camera downward when pieces
-        // settle or when the tower top temporarily drops.
-        if(target>cameraY){
-          cameraY += (target-cameraY)*Math.min(1,dt*5);
-        }
-      }
+    if(!current && spawnAt && performance.now()>=spawnAt){
+      spawnAt=0;
+      spawn();
     }
+
+    updateCamera();
   }
 
   function render(){

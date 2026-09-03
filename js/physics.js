@@ -1,4 +1,4 @@
-/* v17.5 - Matter.js physics layer */
+/* v17.7 - Matter.js physics layer */
 const Physics = (() => {
   const {Engine, World, Bodies, Body, Sleeping} = Matter;
 

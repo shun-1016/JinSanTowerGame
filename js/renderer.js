@@ -1,4 +1,4 @@
-/* v17.5 - Canvas renderer */
+/* v17.7 - Canvas renderer */
 const Renderer = (() => {
   const canvas=document.getElementById("gameCanvas");
   const ctx=canvas.getContext("2d");

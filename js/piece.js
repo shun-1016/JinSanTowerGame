@@ -1,4 +1,4 @@
-/* v17.5 - piece model */
+/* v17.7 - piece model */
 const Piece = (() => {
   const MAX_PIECE = 82;
   const paths = Array.from({length:21}, (_,i) => `assets/${String(i+1).padStart(2,"0")}.png`);

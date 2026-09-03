@@ -1,4 +1,4 @@
-/* v17.5 - mobile input */
+/* v17.7 - mobile input */
 const Input = (() => {
   let dragging=false;
   let pointerId=null;
