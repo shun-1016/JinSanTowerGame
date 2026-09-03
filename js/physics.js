@@ -1,4 +1,4 @@
-/* v20.3 - triangulation diagnostics build; physics geometry behavior unchanged */
+/* v20.4 - landing stability build; geometry/image synchronization unchanged */
 const Physics = (() => {
   const {Engine,World,Bodies,Body,Sleeping}=Matter;
   const engine=Engine.create({
@@ -17,7 +17,7 @@ const Physics = (() => {
   function setup(width,groundY){
     if(ground) World.remove(world,ground);
     ground=Bodies.rectangle(width/2,groundY+14,Math.max(1000,width*3),28,{
-      isStatic:true,label:'ground',friction:0.85,frictionStatic:1,restitution:0.01
+      isStatic:true,label:'ground',friction:0.85,frictionStatic:1,restitution:0
     });
     World.add(world,ground);
   }
@@ -262,8 +262,8 @@ const Physics = (() => {
       label:'piece',
       friction:0.82,
       frictionStatic:0.95,
-      frictionAir:0.008,
-      restitution:0.01,
+      frictionAir:0.012,
+      restitution:0,
       density:0.002,
       sleepThreshold:20
     };
@@ -339,21 +339,60 @@ const Physics = (() => {
   function release(body){
     Body.setStatic(body,false);
     Sleeping.set(body,false);
-    Body.setVelocity(body,{x:0,y:0.5});
+    body.plugin=body.plugin||{};
+    body.plugin.settleFrames=0;
+    // Do not inject an artificial downward velocity. Gravity alone starts
+    // the fall, which avoids an extra impulse at the moment of release.
+    Body.setVelocity(body,{x:0,y:0});
+    Body.setAngularVelocity(body,0);
   }
   function move(body,x,y){
     Body.setPosition(body,{x,y});
     Body.setVelocity(body,{x:0,y:0});
+    Body.setAngularVelocity(body,0);
+    body.plugin=body.plugin||{};
+    body.plugin.settleFrames=0;
     Sleeping.set(body,true);
   }
   function rotate(body,delta){
     Body.rotate(body,delta);
+    Body.setVelocity(body,{x:0,y:0});
+    Body.setAngularVelocity(body,0);
+    body.plugin=body.plugin||{};
+    body.plugin.settleFrames=0;
     Sleeping.set(body,true);
   }
   function step(dt){
-    // Keep the existing frame-time clamp; only the solver/sleep parameters
-    // differ from v20.1 in this diagnostic build.
     Engine.update(engine,Math.max(1,Math.min(33,dt*1000)));
+
+    // Matter.js sleeping is based on near-zero motion, but a compound body
+    // can be repeatedly awakened by tiny contact corrections. Once a released
+    // piece has remained effectively motionless for a short consecutive
+    // period, explicitly zero its velocities and put it to sleep. This keeps
+    // the natural settling phase while removing the long tail of visible
+    // vibration in a finished stack.
+    const bodies=world.bodies;
+    for(const body of bodies){
+      if(body.isStatic || body.label!=='piece') continue;
+      body.plugin=body.plugin||{};
+      if(body.isSleeping){
+        body.plugin.settleFrames=0;
+        continue;
+      }
+      const speed=body.speed||0;
+      const angularSpeed=body.angularSpeed||0;
+      if(speed<0.018 && angularSpeed<0.0008){
+        body.plugin.settleFrames=(body.plugin.settleFrames||0)+1;
+        if(body.plugin.settleFrames>=8){
+          Body.setVelocity(body,{x:0,y:0});
+          Body.setAngularVelocity(body,0);
+          Sleeping.set(body,true);
+          body.plugin.settleFrames=0;
+        }
+      }else{
+        body.plugin.settleFrames=0;
+      }
+    }
   }
   return {engine,world,setup,createPieceBody,add,hold,release,move,rotate,step};
 })();
