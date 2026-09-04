@@ -1,4 +1,4 @@
-/* v21.1 - game feel, HUD, result polish, next-piece preview */
+/* v21.3 - preload flow fix / mode modal shown before image loading */
 const Game = (() => {
   let images=[];
   let pieces=[];
@@ -343,17 +343,46 @@ const Game = (() => {
   async function init(){
     try{
       if(typeof Matter==="undefined") throw new Error("Matter.jsが読み込まれていません");
+
       resize();
       chooseBackground();
-      showStatus("画像を読み込み中…");
-      images=await Piece.preload();
-      ready=false;gameOver=false;score=0;pieces=[];current=null;nextIndex=0;cameraY=0;spawnAt=0;towerHeight=0;gameMode=null;previousBest=getBestScores()[0]||0;
+      ready=false;
+      gameOver=false;
+      score=0;
+      pieces=[];
+      current=null;
+      nextIndex=0;
+      cameraY=0;
+      spawnAt=0;
+      towerHeight=0;
+      gameMode=null;
+      previousBest=getBestScores()[0]||0;
+
       if(stageElement) stageElement.classList.remove('game-over');
-      hideResult();hideStatus();
+      hideResult();
       updateHud();
+
+      // モード選択は画像の読み込み完了を待たず、先に表示する。
+      // iOS等で画像読み込みが遅延・失敗しても、画面が無表示にならないようにする。
       if(modeModal) modeModal.classList.remove('hidden');
+      if(normalModeButton) normalModeButton.disabled=true;
+      if(endlessModeButton) endlessModeButton.disabled=true;
       if(endButton) endButton.disabled=true;
-    }catch(e){console.error(e);showStatus("初期化エラー: "+e.message);throw e;}
+      showStatus("画像を読み込み中…");
+
+      // DOM更新を一度描画させてから画像読み込みを開始する。
+      await new Promise(resolve=>requestAnimationFrame(resolve));
+      images=await Piece.preload();
+
+      hideStatus();
+      if(normalModeButton) normalModeButton.disabled=false;
+      if(endlessModeButton) endlessModeButton.disabled=false;
+    }catch(e){
+      console.error(e);
+      if(normalModeButton) normalModeButton.disabled=true;
+      if(endlessModeButton) endlessModeButton.disabled=true;
+      showStatus("画像読み込みエラー: "+e.message);
+    }
   }
 
   window.addEventListener("resize",()=>{resize();render();});
