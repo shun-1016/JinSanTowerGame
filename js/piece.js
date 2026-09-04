@@ -1,4 +1,4 @@
-/* v22.0 - hole-aware contour cleanup, stable geometry, 37 piece assets, .png/.PNG support */
+/* v22.1 - opaque-region collision geometry, stable contour cleanup, 37 piece assets, .png/.PNG support */
 const Piece = (() => {
   const MAX_PIECE = 82;
   const ALPHA_THRESHOLD = 96;
@@ -83,79 +83,82 @@ const Piece = (() => {
     return out.length>=3?out:points.slice();
   }
 
-  function pointInPolygon(p,poly){
-    let inside=false;
-    for(let i=0,j=poly.length-1;i<poly.length;j=i++){
-      const a=poly[i],b=poly[j];
-      if(((a.y>p.y)!=(b.y>p.y)) &&
-         p.x < (b.x-a.x)*(p.y-a.y)/(b.y-a.y)+a.x) inside=!inside;
+  // Build collision regions directly from the alpha mask.
+  // Each opaque run is vertically merged with the identical run above it.
+  // Transparent areas therefore remain empty physical space. No hole is
+  // bridged into the outer contour.
+  function buildOpaqueRegions(alpha,pw,ph){
+    const solid=new Uint8Array(pw*ph);
+    for(let i=0;i<solid.length;i++) solid[i]=alpha[i*4+3]>=ALPHA_THRESHOLD?1:0;
+
+    const active=new Map();
+    const finished=[];
+
+    function closeRect(key){
+      const r=active.get(key);
+      if(!r) return;
+      finished.push(r);
+      active.delete(key);
     }
-    return inside;
-  }
 
-  function onSegment(p,a,b){
-    return Math.abs((b.x-a.x)*(p.y-a.y)-(b.y-a.y)*(p.x-a.x))<1e-7 &&
-      p.x>=Math.min(a.x,b.x)-1e-7 && p.x<=Math.max(a.x,b.x)+1e-7 &&
-      p.y>=Math.min(a.y,b.y)-1e-7 && p.y<=Math.max(a.y,b.y)+1e-7;
-  }
-
-  function segmentsIntersect(a,b,c,d){
-    const c1=(b.x-a.x)*(c.y-a.y)-(b.y-a.y)*(c.x-a.x);
-    const c2=(b.x-a.x)*(d.y-a.y)-(b.y-a.y)*(d.x-a.x);
-    const c3=(d.x-c.x)*(a.y-c.y)-(d.y-c.y)*(a.x-c.x);
-    const c4=(d.x-c.x)*(b.y-c.y)-(d.y-c.y)*(b.x-c.x);
-    const crossOpp=(c1>1e-7&&c2<-1e-7 || c1<-1e-7&&c2>1e-7) &&
-      (c3>1e-7&&c4<-1e-7 || c3<-1e-7&&c4>1e-7);
-    if(crossOpp) return true;
-    return onSegment(c,a,b)||onSegment(d,a,b)||onSegment(a,c,d)||onSegment(b,c,d);
-  }
-
-  function bridgeHole(outer,hole,otherHoles){
-    // Pick the rightmost hole vertex.  Connecting it to a visible outer
-    // vertex converts the polygon-with-hole into a simple polygon that the
-    // existing ear-clipping triangulator can handle without filling the hole.
-    let hi=0;
-    for(let i=1;i<hole.length;i++){
-      if(hole[i].x>hole[hi].x || (hole[i].x===hole[hi].x&&hole[i].y<hole[hi].y)) hi=i;
-    }
-    const h=hole[hi];
-    const candidates=outer.map((v,i)=>({v,i,d:(v.x-h.x)*(v.x-h.x)+(v.y-h.y)*(v.y-h.y)}))
-      .filter(c=>c.v.x>=h.x-1e-7)
-      .sort((a,b)=>a.d-b.d);
-
-    for(const c of candidates){
-      const v=c.v;
-      const mid={x:(h.x+v.x)/2,y:(h.y+v.y)/2};
-      if(!pointInPolygon(mid,outer)) continue;
-
-      let bad=false;
-      for(let i=0;i<outer.length;i++){
-        const a=outer[i],b=outer[(i+1)%outer.length];
-        if(i===c.i || (i+1)%outer.length===c.i) continue;
-        if(segmentsIntersect(h,v,a,b)){bad=true;break;}
+    for(let y=0;y<ph;y++){
+      const runs=[];
+      let x=0;
+      while(x<pw){
+        while(x<pw&&!solid[y*pw+x]) x++;
+        if(x>=pw) break;
+        const x1=x;
+        while(x<pw&&solid[y*pw+x]) x++;
+        runs.push({x1,x2:x});
       }
-      if(bad) continue;
 
-      for(const oh of [hole,...otherHoles]){
-        for(let i=0;i<oh.length;i++){
-          const a=oh[i],b=oh[(i+1)%oh.length];
-          if(oh===hole && (i===hi || (i+1)%oh.length===hi)) continue;
-          if(segmentsIntersect(h,v,a,b)){bad=true;break;}
+      const seen=new Set();
+      for(const run of runs){
+        const key=`${run.x1},${run.x2}`;
+        const prev=active.get(key);
+        if(prev && prev.y+prev.h===y){
+          prev.h++;
+        }else{
+          for(const k of Array.from(active.keys())) if(!seen.has(k)) closeRect(k);
+          active.set(key,{x:run.x1,y,h:1,w:run.x2-run.x1});
         }
-        if(bad) break;
+        seen.add(key);
       }
-      if(bad) continue;
-
-      const merged=[];
-      for(let i=0;i<=c.i;i++) merged.push(outer[i]);
-      merged.push(h);
-      for(let k=1;k<hole.length;k++) merged.push(hole[(hi+k)%hole.length]);
-      merged.push(h);
-      merged.push(v);
-      for(let i=c.i+1;i<outer.length;i++) merged.push(outer[i]);
-      return merged;
+      for(const k of Array.from(active.keys())){
+        if(!seen.has(k)) closeRect(k);
+      }
     }
-    return null;
+    for(const k of Array.from(active.keys())) closeRect(k);
+
+    // Merge touching rectangles with the same vertical span. This reduces
+    // Matter.js part count without changing the opaque coverage.
+    finished.sort((a,b)=>a.y-b.y||a.x-b.x||a.h-b.h);
+    let changed=true;
+    while(changed){
+      changed=false;
+      outer:
+      for(let i=0;i<finished.length;i++){
+        const a=finished[i];
+        for(let j=i+1;j<finished.length;j++){
+          const b=finished[j];
+          if(a.y===b.y && a.h===b.h &&
+             (a.x+a.w===b.x || b.x+b.w===a.x)){
+            const x1=Math.min(a.x,b.x),x2=Math.max(a.x+a.w,b.x+b.w);
+            finished[i]={x:x1,y:a.y,w:x2-x1,h:a.h};
+            finished.splice(j,1);
+            changed=true;
+            break outer;
+          }
+        }
+      }
+    }
+
+    return finished.filter(r=>r.w>0&&r.h>0).map(r=>[
+      {x:r.x-pw/2,y:r.y-ph/2},
+      {x:r.x+r.w-pw/2,y:r.y-ph/2},
+      {x:r.x+r.w-pw/2,y:r.y+r.h-ph/2},
+      {x:r.x-pw/2,y:r.y+r.h-ph/2}
+    ]);
   }
 
   function extractContours(alpha,pw,ph){
@@ -228,30 +231,27 @@ const Piece = (() => {
       }
     }
 
-    if(!loops.length) return {contour:[],debugContours:[],pointCount:0,holeCount:0};
-    loops.sort((a,b)=>Math.abs(b.area)-Math.abs(a.area));
+    const regions=buildOpaqueRegions(alpha,pw,ph);
+    if(!loops.length) return {
+      contour:[],
+      debugContours:[],
+      pointCount:0,
+      holeCount:0,
+      regions
+    };
 
+    loops.sort((a,b)=>Math.abs(b.area)-Math.abs(a.area));
     const outer=loops[0].poly;
-    const holes=loops.slice(1).filter(x=>x.area<0 && Math.abs(x.area)>=6).map(x=>x.poly);
-    let merged=outer.slice();
-    const remaining=holes.slice().sort((a,b)=>{
-      const ax=Math.max(...a.map(p=>p.x)),bx=Math.max(...b.map(p=>p.x));
-      return bx-ax;
-    });
-    let bridgeFailed=false;
-    while(remaining.length){
-      const hole=remaining.shift();
-      const bridged=bridgeHole(merged,hole,remaining);
-      if(bridged) merged=bridged;
-      else bridgeFailed=true;
-    }
+    const holes=loops.slice(1)
+      .filter(x=>x.area<0 && Math.abs(x.area)>=6)
+      .map(x=>x.poly);
 
     return {
-      contour:merged,
+      contour:outer,
       debugContours:[outer,...holes],
-      pointCount:merged.length,
+      pointCount:outer.length,
       holeCount:holes.length,
-      bridgeFailed
+      regions
     };
   }
 
@@ -266,7 +266,7 @@ const Piece = (() => {
     ctx.drawImage(im,0,0,pw,ph);
     const data=ctx.getImageData(0,0,pw,ph).data;
     const extracted=extractContours(data,pw,ph);
-    const result={w,h,contour:extracted.contour,debugContours:extracted.debugContours,pointCount:extracted.pointCount,holeCount:extracted.holeCount,bridgeFailed:extracted.bridgeFailed};
+    const result={w,h,contour:extracted.contour,debugContours:extracted.debugContours,pointCount:extracted.pointCount,holeCount:extracted.holeCount,regions:extracted.regions};
     shapeCache.set(im,result);
     return result;
   }

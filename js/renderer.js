@@ -1,4 +1,4 @@
-/* v22.0 - debug overlay updated for 37 pieces and hole-aware contours */
+/* v22.1 - debug overlay for 37 pieces and opaque-region collision geometry */
 const Renderer = (() => {
   const canvas=document.getElementById('gameCanvas');
   const ctx=canvas.getContext('2d');
@@ -32,7 +32,7 @@ const Renderer = (() => {
       `DEBUG: ON　${pl.debugFixedPiece?'固定':'通常順番(01→37)'}<br>`+
       `簡略化後: ${td.cleanCount??'-'}　面積: ${Number(td.area??0).toFixed(2)}　自己交差: ${td.selfIntersection?'YES':'NO'}<br>`+
       `三角形化: ${td.failed?'FAIL':'OK'}　理由: ${td.failReason||'-'}　元三角形: ${pl.debugTriangulatedCount||0}<br>`+
-      `物理凸ポリゴン: ${pl.debugConvexPartCount||actualVerts}　物理頂点: ${actualVerts}　穴: ${pl.debugHoleCount||0}　Fallback: ${pl.debugFallback?'YES':'NO'}`;
+      `物理凸ポリゴン: ${pl.debugConvexPartCount||actualVerts}　物理頂点: ${actualVerts}　領域: ${pl.debugRegionCount||0}　穴: ${pl.debugHoleCount||0}　Fallback: ${pl.debugFallback?'YES':'NO'}`;
   }
   function addBurst(x,y,count,kind){for(let i=0;i<count;i++){const angle=Math.random()*Math.PI*2;const speed=(kind==='gameover'?35:kind==='rotate'?12:25)*(0.55+Math.random()*.75);effects.push({x,y,vx:Math.cos(angle)*speed,vy:Math.sin(angle)*speed-(kind==='drop'?12:0),life:0,max:kind==='gameover'?700:420,size:kind==='gameover'?2.4:2,kind});}}
   function emitDrop(x,y){addBurst(x,y,12,'drop');}

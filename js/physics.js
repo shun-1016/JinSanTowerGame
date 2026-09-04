@@ -1,4 +1,4 @@
-/* v21.0 - final v20.5 physics + shorter base */
+/* v22.1 - v20.5 stable physics + opaque-region compound geometry */
 const Physics = (() => {
   const {Engine,World,Bodies,Body,Sleeping}=Matter;
   const engine=Engine.create({
@@ -12,26 +12,13 @@ const Physics = (() => {
   engine.gravity.x=0;engine.gravity.y=1;engine.gravity.scale=0.001;
   const world=engine.world;
   let ground=null;
-  let sideWalls=[];
 
-  function setup(width,groundY,baseWidth,endless=false){
+  function setup(width,groundY){
     if(ground) World.remove(world,ground);
-    if(sideWalls.length){World.remove(world,sideWalls);sideWalls=[];}
-    const actualBaseWidth=baseWidth||width*0.82;
-    ground=Bodies.rectangle(width/2,groundY+14,actualBaseWidth,28,{
+    ground=Bodies.rectangle(width/2,groundY+14,Math.max(1000,width*3),28,{
       isStatic:true,label:'ground',friction:0.85,frictionStatic:1,restitution:0
     });
     World.add(world,ground);
-    if(endless){
-      const wallHeight=100000;
-      const wallY=groundY-wallHeight/2+28;
-      const wallOptions={isStatic:true,label:'side-wall',friction:0.85,frictionStatic:1,restitution:0};
-      sideWalls=[
-        Bodies.rectangle(-12,wallY,24,wallHeight,wallOptions),
-        Bodies.rectangle(width+12,wallY,24,wallHeight,wallOptions)
-      ];
-      World.add(world,sideWalls);
-    }
   }
 
   function cross(a,b,c){return (b.x-a.x)*(c.y-a.y)-(b.y-a.y)*(c.x-a.x);}
@@ -279,33 +266,53 @@ const Physics = (() => {
       density:0.002,
       sleepThreshold:20
     };
-    const contour=shape&&shape.contour;
-    const triResult=triangulateDetailed(contour);
-    const triangles=triResult.triangles;
-    const triDiag=triResult.diag;
-    const convexPolys=triangles.length?convexDecompose(triangles):[];
+
+    // v22.1 B案:
+    // Build the collision body from multiple opaque regions generated from
+    // the alpha mask. This avoids the fragile "outer contour + hole bridge"
+    // conversion used by v22.0. Transparent areas are never filled.
+    const regions=(shape&&Array.isArray(shape.regions))?shape.regions:[];
+    const allTriangles=[];
+    let failed=false;
+    let failReason='NONE';
+    let failIteration=-1;
+    let remainingVertices=0;
+
+    for(const region of regions){
+      const result=triangulateDetailed(region);
+      if(result.diag.failed){
+        failed=true;
+        if(failReason==='NONE') failReason=result.diag.failReason||'REGION_TRIANGULATION_FAILED';
+        failIteration=result.diag.failIteration;
+        remainingVertices=result.diag.remainingVertices;
+        continue;
+      }
+      allTriangles.push(...result.triangles);
+    }
+
+    // Backward-compatible fallback for a shape object that has no regions.
+    if(!regions.length && shape&&shape.contour&&shape.contour.length>=3){
+      const result=triangulateDetailed(shape.contour);
+      if(result.diag.failed){
+        failed=true;
+        failReason=result.diag.failReason||'CONTOUR_TRIANGULATION_FAILED';
+        failIteration=result.diag.failIteration;
+        remainingVertices=result.diag.remainingVertices;
+      }else{
+        allTriangles.push(...result.triangles);
+      }
+    }
+
+    const convexPolys=allTriangles.length?convexDecompose(allTriangles):[];
     let body=null;
     let fallback=false;
 
     if(convexPolys.length){
-      // IMPORTANT:
-      // Do not pass image-space triangles directly as separate vertexSets to
-      // Bodies.fromVertices(). In Matter.js each set is reoriented around its
-      // own centre, which destroys the triangles' relative image-space offsets.
       const parts=convexPolys.map(poly=>makeConvexPart(poly,options));
-
       if(parts.length){
-        // Build one rigid compound body.  Each part already has its position
-        // in image-local coordinates, so Body.create can preserve the complete
-        // spatial arrangement of the triangulation.
         body=Body.create({...options,parts:parts.slice()});
-
-        // We created the geometry around image-local (0,0), so after Body.create
-        // the body.position is the compound COM in that local coordinate system.
-        // Store the offset needed to render the image centre at local (0,0).
         const comLocal={x:body.position.x,y:body.position.y};
         const visualOffset={x:-comLocal.x,y:-comLocal.y};
-
         Body.setPosition(body,{x,y});
         body.plugin=body.plugin||{};
         body.plugin.imageVisualOffset=visualOffset;
@@ -320,17 +327,34 @@ const Physics = (() => {
       body.plugin.imageVisualOffset={x:0,y:0};
     }
 
+    const areaTotal=allTriangles.reduce((sum,t)=>sum+Math.abs(area(t)),0);
+    const diag={
+      inputCount:regions.reduce((sum,r)=>sum+r.length,0),
+      cleanCount:regions.reduce((sum,r)=>sum+r.length,0),
+      area:areaTotal,
+      winding:'CCW',
+      selfIntersection:false,
+      selfIntersectionEdges:null,
+      triangles:allTriangles.length,
+      failed:failed,
+      failReason:failed?failReason:'NONE',
+      failIteration,
+      remainingVertices
+    };
+
     body.plugin=body.plugin||{};
     body.plugin.imageWidth=w;
     body.plugin.imageHeight=h;
     body.plugin.debugContours=shape&&shape.debugContours?shape.debugContours:[];
     body.plugin.debugContourVertexCount=shape&&shape.pointCount||0;
-    body.plugin.debugTriangulatedCount=triangles.length;
+    body.plugin.debugTriangulatedCount=allTriangles.length;
     body.plugin.debugConvexPartCount=convexPolys.length;
-    body.plugin.debugTriangulation=triDiag;
+    body.plugin.debugTriangulation=diag;
     body.plugin.debugFallback=fallback;
-    body.plugin.debugShapeReady=!fallback&&triangles.length>0;
+    body.plugin.debugShapeReady=!fallback&&allTriangles.length>0;
     body.plugin.debugBodyCreated=true;
+    body.plugin.debugHoleCount=shape&&shape.holeCount||0;
+    body.plugin.debugRegionCount=regions.length;
     body.plugin.debugPartCentroids=convexPolys.map(poly=>({
       x:poly.reduce((sum,p)=>sum+p.x,0)/poly.length,
       y:poly.reduce((sum,p)=>sum+p.y,0)/poly.length

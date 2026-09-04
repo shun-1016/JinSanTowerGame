@@ -1,4 +1,4 @@
-/* v22.0 - random piece selection with 37 pieces */
+/* v22.1 - random piece selection with 37 pieces */
 const Game = (() => {
   let images=[];
   let pieces=[];
