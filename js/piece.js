@@ -1,7 +1,7 @@
-/* v21.8.3 - higher-fidelity contours, 36 piece assets, .png/.PNG support */
+/* v21.8.4 - contour cleanup/smoothing, 36 piece assets, .png/.PNG support */
 const Piece = (() => {
   const MAX_PIECE = 82;
-  const ALPHA_THRESHOLD = 32;
+  const ALPHA_THRESHOLD = 96;
   const PIECE_COUNT = 36;
   const paths = Array.from({length:PIECE_COUNT}, (_,i) => `assets/${String(i+1).padStart(2,"0")}.png`);
   const shapeCache = new WeakMap();
@@ -142,7 +142,14 @@ const Piece = (() => {
       }
       if(closed&&loop.length>=4){
         let clean=simplifyCollinear(loop);
-        if(clean.length>140) clean=simplifyClosed(clean,0.30);
+        // The alpha mask is sampled at a maximum size of 82px.  A very small
+        // RDP epsilon preserves the raster staircase as hundreds of tiny
+        // corners, which then becomes many tiny physical parts.  Simplify
+        // progressively so complex silhouettes keep their broad shape while
+        // eliminating pixel-level zigzags that add no useful collision detail.
+        if(clean.length>80) clean=simplifyClosed(clean,0.85);
+        if(clean.length>110) clean=simplifyClosed(clean,1.10);
+        if(clean.length>140) clean=simplifyClosed(clean,1.35);
         if(clean.length>=3){
           const normalized=clean.map(p=>({x:p.x-pw/2,y:p.y-ph/2}));
           if(Math.abs(polygonArea(normalized))>0.05) loops.push(normalized);
