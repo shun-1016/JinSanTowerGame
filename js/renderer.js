@@ -1,10 +1,11 @@
-/* v21.0 - Canvas renderer with shorter base */
+/* v21.1 - Canvas renderer, debug overlay, and lightweight game effects */
 const Renderer = (() => {
   const canvas=document.getElementById('gameCanvas');
   const ctx=canvas.getContext('2d');
   let width=0,height=0,dpr=1;
-  const DEBUG_SHAPE=new URLSearchParams(location.search).get("debug")==="on";
+  const DEBUG_SHAPE=new URLSearchParams(location.search).get('debug')==='on';
   const debugEl=document.getElementById('shapeDebug');
+  const effects=[];
 
   function resize(){
     const r=canvas.getBoundingClientRect(); width=r.width;height=r.height;
@@ -40,14 +41,42 @@ const Renderer = (() => {
       `三角形化: ${td.failed?'FAIL':'OK'}　理由: ${td.failReason||'-'}　元三角形: ${pl.debugTriangulatedCount||0}<br>`+
       `物理凸ポリゴン: ${pl.debugConvexPartCount||actualVerts}　物理頂点: ${actualVerts}　Fallback: ${pl.debugFallback?'YES':'NO'}`;
   }
+
+  function addBurst(x,y,count,kind){
+    for(let i=0;i<count;i++){
+      const angle=Math.random()*Math.PI*2;
+      const speed=(kind==='gameover'?35:kind==='rotate'?12:25)*(0.55+Math.random()*.75);
+      effects.push({x,y,vx:Math.cos(angle)*speed,vy:Math.sin(angle)*speed-(kind==='drop'?12:0),life:0,max:kind==='gameover'?700:420,size:kind==='gameover'?2.4:2,kind});
+    }
+  }
+  function emitDrop(x,y){addBurst(x,y,12,'drop');}
+  function emitRotate(x,y){addBurst(x,y,4,'rotate');}
+  function emitGameOver(x,y){addBurst(x,y,28,'gameover');}
+  function updateEffects(dt){
+    const ms=Math.max(0,Math.min(50,dt*1000));
+    for(let i=effects.length-1;i>=0;i--){
+      const e=effects[i];e.life+=ms;e.x+=e.vx*dt;e.y+=e.vy*dt;e.vy+=55*dt;e.vx*=Math.pow(.985,ms/16);
+      if(e.life>=e.max) effects.splice(i,1);
+    }
+  }
+  function renderEffects(cameraY){
+    ctx.save();
+    for(const e of effects){
+      const alpha=Math.max(0,1-e.life/e.max);ctx.globalAlpha=alpha*.75;
+      ctx.beginPath();ctx.arc(e.x,e.y-cameraY,e.size,0,Math.PI*2);ctx.fillStyle=e.kind==='gameover'?'rgba(255,255,255,.95)':e.kind==='rotate'?'rgba(70,120,255,.9)':'rgba(255,245,190,.95)';ctx.fill();
+    }
+    ctx.restore();
+  }
+
   function drawPiece(p,cameraY){
     const b=p.body;ctx.save();ctx.translate(b.position.x,b.position.y-cameraY);ctx.rotate(b.angle);
     const off=(b.plugin&&b.plugin.imageVisualOffset)||{x:0,y:0};ctx.drawImage(p.im,off.x-p.w/2,off.y-p.h/2,p.w,p.h);ctx.restore();drawDebugShape(p,cameraY);
   }
   function drawGround(y,cameraY,baseWidth){
     const bw=baseWidth||width*.82,left=(width-bw)/2,right=left+bw,yy=y-cameraY;
-    ctx.save();ctx.beginPath();ctx.moveTo(left,yy);ctx.lineTo(right,yy);ctx.strokeStyle='#777';ctx.lineWidth=3;ctx.lineCap='round';ctx.stroke();ctx.restore();
+    ctx.save();ctx.beginPath();ctx.moveTo(left,yy);ctx.lineTo(right,yy);ctx.strokeStyle='rgba(70,70,70,.78)';ctx.lineWidth=4;ctx.lineCap='round';ctx.stroke();
+    ctx.beginPath();ctx.moveTo(left+4,yy+3);ctx.lineTo(right-4,yy+3);ctx.strokeStyle='rgba(255,255,255,.55)';ctx.lineWidth=1;ctx.stroke();ctx.restore();
   }
   function renderDebugTarget(current,pieces){if(!DEBUG_SHAPE)return;const target=current||((pieces&&pieces.length)?pieces[pieces.length-1]:null);if(target)updateDebugPanel(target);else if(debugEl)debugEl.textContent='輪郭解析: 待機中';}
-  return {canvas,resize,clear,drawPiece,drawGround,renderDebugTarget,get width(){return width},get height(){return height}};
+  return {canvas,resize,clear,drawPiece,drawGround,renderDebugTarget,emitDrop,emitRotate,emitGameOver,updateEffects,renderEffects,get width(){return width},get height(){return height}};
 })();
