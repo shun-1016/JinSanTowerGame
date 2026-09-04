@@ -10,17 +10,23 @@
 <body>
   <header class="header">
     <h1>JinSan Tower Game</h1>
-    <div class="headerRight">
-      <span id="version">v20.5</span>
-      <span id="score">Score: 0</span>
-    </div>
+    <div class="headerRight"><span id="version">v21.0</span><span id="score">Score: 0</span></div>
   </header>
-
   <main>
     <div class="stage">
       <canvas id="gameCanvas"></canvas>
       <div id="status" class="status">読み込み中…</div>
       <div id="shapeDebug" class="shapeDebug">輪郭解析: 待機中</div>
+      <div id="resultScreen" class="resultScreen hidden">
+        <div class="resultCard">
+          <h2>ゲームオーバー</h2>
+          <p class="resultLabel">今回のスコア</p>
+          <div id="resultScore" class="resultScore">0</div>
+          <p class="bestTitle">歴代ベスト3</p>
+          <ol id="bestScores" class="bestScores"></ol>
+          <button id="restartButton" class="restartButton" type="button">もう一度遊ぶ</button>
+        </div>
+      </div>
     </div>
     <div class="controls">
       <button id="rotateLeft" type="button" aria-label="左回転">↶</button>
@@ -28,8 +34,6 @@
       <button id="rotateRight" type="button" aria-label="右回転">↷</button>
     </div>
   </main>
-
-  <!-- Matter.js is loaded before the game modules. -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.20.0/matter.min.js"></script>
   <script src="js/physics.js"></script>
   <script src="js/piece.js"></script>
