@@ -1,9 +1,10 @@
-/* v21.5 - control area height 1.5x */
+/* v21.7 - random piece selection */
 const Game = (() => {
   let images=[];
   let pieces=[];
   let current=null;
   let nextIndex=0;
+  let pieceQueue=[];
   let score=0;
   let cameraY=0;
   let stageW=390;
@@ -61,6 +62,19 @@ const Game = (() => {
     if(hudBest) hudBest.textContent=gameMode===MODE_ENDLESS?'—':(best===undefined?'—':String(best));
     if(hudHeight) hudHeight.textContent=String(Math.max(0,Math.round(towerHeight)));
     if(document.getElementById("score")) document.getElementById("score").textContent=`SCORE ${score}`;
+  }
+
+  function refillPieceQueue(){
+    pieceQueue=images.map((_,i)=>i);
+    for(let i=pieceQueue.length-1;i>0;i--){
+      const j=Math.floor(Math.random()*(i+1));
+      [pieceQueue[i],pieceQueue[j]]=[pieceQueue[j],pieceQueue[i]];
+    }
+  }
+
+  function getNextPieceIndex(){
+    if(!pieceQueue.length) refillPieceQueue();
+    return pieceQueue.shift();
   }
 
   function updateNextPreview(){
@@ -214,7 +228,7 @@ const Game = (() => {
     const p=Piece.create(spawnIndex,images,x,y);
     p.body.plugin=p.body.plugin||{};
     p.body.plugin.debugFixedPiece=DEBUG_SINGLE_PIECE;
-    if(!DEBUG_SINGLE_PIECE) nextIndex=(nextIndex+1)%images.length;
+    if(!DEBUG_SINGLE_PIECE) nextIndex=getNextPieceIndex();
     current=p;
     Physics.add(p.body);
     Physics.hold(p.body,x,y,0);
@@ -323,7 +337,8 @@ const Game = (() => {
   function startGame(mode){
     if(mode!==MODE_NORMAL && mode!==MODE_ENDLESS) return;
     gameMode=mode;
-    score=0;pieces=[];current=null;nextIndex=0;cameraY=0;spawnAt=0;towerHeight=0;gameOver=false;ready=true;
+    score=0;pieces=[];current=null;pieceQueue=[];nextIndex=0;cameraY=0;spawnAt=0;towerHeight=0;gameOver=false;ready=true;
+    if(!DEBUG_SINGLE_PIECE) nextIndex=getNextPieceIndex();
     previousBest=getBestScores()[0]||0;
     if(stageElement) stageElement.classList.remove('game-over');
     if(modeModal) modeModal.classList.add('hidden');
@@ -352,6 +367,7 @@ const Game = (() => {
       pieces=[];
       current=null;
       nextIndex=0;
+      pieceQueue=[];
       cameraY=0;
       spawnAt=0;
       towerHeight=0;
