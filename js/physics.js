@@ -12,14 +12,26 @@ const Physics = (() => {
   engine.gravity.x=0;engine.gravity.y=1;engine.gravity.scale=0.001;
   const world=engine.world;
   let ground=null;
+  let sideWalls=[];
 
-  function setup(width,groundY,baseWidth){
+  function setup(width,groundY,baseWidth,endless=false){
     if(ground) World.remove(world,ground);
+    if(sideWalls.length){World.remove(world,sideWalls);sideWalls=[];}
     const actualBaseWidth=baseWidth||width*0.82;
     ground=Bodies.rectangle(width/2,groundY+14,actualBaseWidth,28,{
       isStatic:true,label:'ground',friction:0.85,frictionStatic:1,restitution:0
     });
     World.add(world,ground);
+    if(endless){
+      const wallHeight=100000;
+      const wallY=groundY-wallHeight/2+28;
+      const wallOptions={isStatic:true,label:'side-wall',friction:0.85,frictionStatic:1,restitution:0};
+      sideWalls=[
+        Bodies.rectangle(-12,wallY,24,wallHeight,wallOptions),
+        Bodies.rectangle(width+12,wallY,24,wallHeight,wallOptions)
+      ];
+      World.add(world,sideWalls);
+    }
   }
 
   function cross(a,b,c){return (b.x-a.x)*(c.y-a.y)-(b.y-a.y)*(c.x-a.x);}

@@ -18,9 +18,13 @@ const Game = (() => {
   let audioCtx=null;
   let previousBest=0;
   let stageElement=null;
+  let gameMode=null;
   const NEXT_PIECE_DELAY=500;
+  const SPAWN_Y_OFFSET=35;
   const BASE_WIDTH_RATIO=0.82;
   const GAME_OVER_KEY='jinSanTowerGameBestScores';
+  const MODE_NORMAL='normal';
+  const MODE_ENDLESS='endless';
 
   const params=new URLSearchParams(location.search);
   const DEBUG_MODE=params.get("debug")==="on";
@@ -42,15 +46,21 @@ const Game = (() => {
   const newRecord=document.getElementById("newRecord");
   const resultHeight=document.getElementById("resultHeight");
   const resultPieces=document.getElementById("resultPieces");
+  const resultTitle=document.querySelector("#resultScreen h2");
+  const bestTitle=document.querySelector(".bestTitle");
+  const modeModal=document.getElementById("modeModal");
+  const normalModeButton=document.getElementById("normalModeButton");
+  const endlessModeButton=document.getElementById("endlessModeButton");
+  const endButton=document.getElementById("endButton");
 
   function showStatus(text){status.textContent=text;status.classList.remove("hidden");}
 
   function updateHud(){
     const best=getBestScores()[0];
     if(hudScore) hudScore.textContent=String(score);
-    if(hudBest) hudBest.textContent=best===undefined?'—':String(best);
+    if(hudBest) hudBest.textContent=gameMode===MODE_ENDLESS?'—':(best===undefined?'—':String(best));
     if(hudHeight) hudHeight.textContent=String(Math.max(0,Math.round(towerHeight)));
-    document.getElementById("score").textContent=`SCORE ${score}`;
+    if(document.getElementById("score")) document.getElementById("score").textContent=`SCORE ${score}`;
   }
 
   function updateNextPreview(){
@@ -69,20 +79,45 @@ const Game = (() => {
       const C=window.AudioContext||window.webkitAudioContext;
       if(!C) return null;
       if(!audioCtx) audioCtx=new C();
-      if(audioCtx.state==='suspended') audioCtx.resume();
       return audioCtx;
     }catch(e){return null;}
+  }
+
+  function unlockAudio(){
+    const c=prepareAudio();
+    if(!c) return;
+    try{if(c.state==='suspended') c.resume();}catch(e){}
+  }
+
+  function scheduleTone(c,type){
+    const now=c.currentTime;
+    const o=c.createOscillator(),g=c.createGain();
+    o.connect(g);g.connect(c.destination);
+    if(type==='rotate'){
+      o.type='sine';o.frequency.setValueAtTime(520,now);o.frequency.exponentialRampToValueAtTime(700,now+.055);
+      g.gain.setValueAtTime(.0001,now);g.gain.exponentialRampToValueAtTime(.045,now+.008);g.gain.exponentialRampToValueAtTime(.0001,now+.07);
+      o.start(now);o.stop(now+.075);
+    }else if(type==='drop'){
+      o.type='triangle';o.frequency.setValueAtTime(180,now);o.frequency.exponentialRampToValueAtTime(95,now+.13);
+      g.gain.setValueAtTime(.0001,now);g.gain.exponentialRampToValueAtTime(.12,now+.008);g.gain.exponentialRampToValueAtTime(.0001,now+.16);
+      o.start(now);o.stop(now+.17);
+    }else{
+      o.type='sawtooth';o.frequency.setValueAtTime(220,now);o.frequency.exponentialRampToValueAtTime(80,now+.35);
+      g.gain.setValueAtTime(.0001,now);g.gain.exponentialRampToValueAtTime(.1,now+.015);g.gain.exponentialRampToValueAtTime(.0001,now+.4);
+      o.start(now);o.stop(now+.41);
+    }
   }
 
   function playTone(type){
     const c=prepareAudio();
     if(!c) return;
-    const now=c.currentTime;
-    const o=c.createOscillator(),g=c.createGain();
-    o.connect(g);g.connect(c.destination);
-    if(type==='rotate'){o.type='sine';o.frequency.setValueAtTime(520,now);o.frequency.exponentialRampToValueAtTime(700,now+.055);g.gain.setValueAtTime(.0001,now);g.gain.exponentialRampToValueAtTime(.045,now+.008);g.gain.exponentialRampToValueAtTime(.0001,now+.07);o.start(now);o.stop(now+.075);}
-    else if(type==='drop'){o.type='triangle';o.frequency.setValueAtTime(180,now);o.frequency.exponentialRampToValueAtTime(95,now+.13);g.gain.setValueAtTime(.0001,now);g.gain.exponentialRampToValueAtTime(.12,now+.008);g.gain.exponentialRampToValueAtTime(.0001,now+.16);o.start(now);o.stop(now+.17);}
-    else {o.type='sawtooth';o.frequency.setValueAtTime(220,now);o.frequency.exponentialRampToValueAtTime(80,now+.35);g.gain.setValueAtTime(.0001,now);g.gain.exponentialRampToValueAtTime(.1,now+.015);g.gain.exponentialRampToValueAtTime(.0001,now+.4);o.start(now);o.stop(now+.41);}
+    try{
+      if(c.state==='suspended'){
+        c.resume().then(()=>{if(c.state==='running') scheduleTone(c,type)}).catch(()=>{});
+        return;
+      }
+      if(c.state==='running') scheduleTone(c,type);
+    }catch(e){}
   }
 
   function vibrate(pattern){try{if(navigator.vibrate) navigator.vibrate(pattern)}catch(e){}}
@@ -118,17 +153,22 @@ const Game = (() => {
     }
   }
 
-  function showResult(){
+  function showResult(reason='gameover'){
+    const isEndless=gameMode===MODE_ENDLESS;
+    const shouldRecord=!isEndless;
     const oldBest=previousBest;
-    const best=saveScore(score);
+    const best=shouldRecord?saveScore(score):getBestScores();
+    if(resultTitle) resultTitle.textContent=reason==='ended'?'ゲーム終了':'ゲームオーバー';
     if(resultScore) resultScore.textContent=String(score);
     if(resultHeight) resultHeight.textContent=String(Math.max(0,Math.round(towerHeight)));
     if(resultPieces) resultPieces.textContent=String(pieces.length);
     if(newRecord){
-      const record=score>oldBest && score>0;
+      const record=shouldRecord && score>oldBest && score>0;
       newRecord.classList.toggle('hidden',!record);
     }
-    renderBestScores(best);
+    if(bestTitle) bestTitle.classList.toggle('hidden',isEndless);
+    if(bestScores) bestScores.classList.toggle('hidden',isEndless);
+    if(!isEndless) renderBestScores(best);
     if(resultScreen) resultScreen.classList.remove('hidden');
   }
 
@@ -141,8 +181,9 @@ const Game = (() => {
     spawnAt=0;
     ready=false;
     updateHud();
+    if(stageElement) stageElement.classList.add('game-over');
     Renderer.emitGameOver(stageW/2,stageH*.42+cameraY);
-    showResult();
+    showResult('gameover');
   }
 
   function resize(){
@@ -151,7 +192,7 @@ const Game = (() => {
     baseWidth=stageW*BASE_WIDTH_RATIO;
     baseLeft=(stageW-baseWidth)/2;
     baseRight=baseLeft+baseWidth;
-    Physics.setup(stageW,stageH-12,baseWidth);
+    Physics.setup(stageW,stageH-12,baseWidth,gameMode===MODE_ENDLESS);
     if(current && !current.dropped){
       const x=Math.max(current.w/2,Math.min(stageW-current.w/2,current.body.position.x));
       if(Math.abs(x-current.body.position.x)>0.01) Physics.move(current.body,x,current.body.position.y);
@@ -168,7 +209,7 @@ const Game = (() => {
   function spawn(){
     if(!ready || gameOver) return;
     const x=stageW/2;
-    const y=cameraY+Math.max(60,Math.min(100,stageH*0.18));
+    const y=cameraY+Math.max(60,Math.min(100,stageH*0.18))+SPAWN_Y_OFFSET;
     const spawnIndex=DEBUG_SINGLE_PIECE?DEBUG_PIECE_INDEX:nextIndex;
     const p=Piece.create(spawnIndex,images,x,y);
     p.body.plugin=p.body.plugin||{};
@@ -217,8 +258,8 @@ const Game = (() => {
     return belowSurface && outside;
   }
 
-  const CAMERA_TRIGGER=0.45;
-  const CAMERA_TARGET=0.45;
+  const CAMERA_TRIGGER=0.52;
+  const CAMERA_TARGET=0.52;
   const CAMERA_SMOOTH=8;
 
   function updateCamera(){
@@ -244,7 +285,7 @@ const Game = (() => {
     if(gameOver) return;
 
     for(const p of pieces){
-      if(pieceHasFallenOutsideBase(p)){
+      if(gameMode!==MODE_ENDLESS && pieceHasFallenOutsideBase(p)){
         setGameOver();
         return;
       }
@@ -269,6 +310,32 @@ const Game = (() => {
     Renderer.renderDebugTarget(current,pieces);
   }
 
+  function endGame(){
+    if(!ready || gameOver || !gameMode) return;
+    gameOver=true;
+    current=null;
+    spawnAt=0;
+    ready=false;
+    showResult('ended');
+    Renderer.emitGameOver(stageW/2,stageH*.42+cameraY);
+  }
+
+  function startGame(mode){
+    if(mode!==MODE_NORMAL && mode!==MODE_ENDLESS) return;
+    gameMode=mode;
+    score=0;pieces=[];current=null;nextIndex=0;cameraY=0;spawnAt=0;towerHeight=0;gameOver=false;ready=true;
+    previousBest=getBestScores()[0]||0;
+    if(stageElement) stageElement.classList.remove('game-over');
+    if(modeModal) modeModal.classList.add('hidden');
+    if(endButton) endButton.disabled=false;
+    hideResult();
+    resize();
+    updateHud();
+    updateNextPreview();
+    spawn();
+    render();
+  }
+
   function reset(){
     location.reload();
   }
@@ -280,17 +347,22 @@ const Game = (() => {
       chooseBackground();
       showStatus("画像を読み込み中…");
       images=await Piece.preload();
-      ready=true;gameOver=false;score=0;pieces=[];current=null;nextIndex=0;cameraY=0;spawnAt=0;towerHeight=0;previousBest=getBestScores()[0]||0;
+      ready=false;gameOver=false;score=0;pieces=[];current=null;nextIndex=0;cameraY=0;spawnAt=0;towerHeight=0;gameMode=null;previousBest=getBestScores()[0]||0;
       if(stageElement) stageElement.classList.remove('game-over');
       hideResult();hideStatus();
       updateHud();
-      updateNextPreview();
-      spawn();render();
+      if(modeModal) modeModal.classList.remove('hidden');
+      if(endButton) endButton.disabled=true;
     }catch(e){console.error(e);showStatus("初期化エラー: "+e.message);throw e;}
   }
 
   window.addEventListener("resize",()=>{resize();render();});
   if(restartButton) restartButton.addEventListener('click',reset);
+  if(normalModeButton) normalModeButton.addEventListener('click',()=>startGame(MODE_NORMAL));
+  if(endlessModeButton) endlessModeButton.addEventListener('click',()=>startGame(MODE_ENDLESS));
+  if(endButton) endButton.addEventListener('click',endGame);
+  document.addEventListener('pointerdown',unlockAudio,{passive:true});
+  document.addEventListener('touchstart',unlockAudio,{passive:true});
 
   return {init,update,render,moveCurrentTo,rotate,drop,get current(){return current},get ready(){return ready}};
 })();
