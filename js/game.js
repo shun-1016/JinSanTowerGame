@@ -26,6 +26,14 @@ const Game = (() => {
   const GAME_OVER_KEY='jinSanTowerGameBestScores';
   const MODE_NORMAL='normal';
   const MODE_ENDLESS='endless';
+  const MEASUREMENT_PIECE_COUNT=37;
+  const MEASUREMENT_POST_LAND_FRAMES=60;
+  let measurement=null;
+  const measurementDebugEl=document.getElementById('measurementDebug');
+  const measurementStatusEl=document.getElementById('measurementStatus');
+  const measurementButton=document.getElementById('measurementButton');
+  const measurementDownload=document.getElementById('measurementDownload');
+  if(measurementDebugEl) measurementDebugEl.classList.toggle('hidden',!DEBUG_MODE);
 
   const params=new URLSearchParams(location.search);
   const DEBUG_MODE=params.get("debug")==="on";
@@ -55,6 +63,135 @@ const Game = (() => {
   const normalModeButton=document.getElementById("normalModeButton");
   const endlessModeButton=document.getElementById("endlessModeButton");
   const endButton=document.getElementById("endButton");
+
+  function measurementSetStatus(text){
+    if(measurementStatusEl) measurementStatusEl.textContent=text;
+  }
+
+  function measurementClearDynamicBodies(){
+    if(!Physics.world) return;
+    const dynamic=Physics.world.bodies.filter(b=>!b.isStatic);
+    if(dynamic.length) Matter.World.remove(Physics.world,dynamic);
+  }
+
+  function measurementHasGroundContact(body){
+    for(const pair of Physics.engine.pairs.list){
+      if(!pair.isActive) continue;
+      const a=pair.bodyA&&pair.bodyA.parent?pair.bodyA.parent:pair.bodyA;
+      const b=pair.bodyB&&pair.bodyB.parent?pair.bodyB.parent:pair.bodyB;
+      if((a===body&&b&&b.label==='ground')||(b===body&&a&&a.label==='ground')) return true;
+    }
+    return false;
+  }
+
+  function measurementCreatePiece(index){
+    measurementClearDynamicBodies();
+    Physics.setup(stageW,stageH-12,baseWidth,false);
+    const x=stageW/2;
+    const y=Math.max(80,stageH*0.18);
+    const p=Piece.create(index,images,x,y);
+    p.body.plugin=p.body.plugin||{};
+    p.body.plugin.debugFixedPiece=true;
+    Physics.add(p.body);
+    Physics.hold(p.body,x,y,0);
+    Physics.release(p.body);
+    measurement.current=p;
+    measurement.phase='falling';
+    measurement.frame=0;
+    measurement.startedAt=performance.now();
+    measurement.landingFrame=null;
+    measurement.postLandFrames=0;
+    measurement.rows=[];
+  }
+
+  function measurementRow(p,contact){
+    const b=p.body,pl=b.plugin||{};
+    const t=Math.max(0,performance.now()-measurement.startedAt);
+    const phase=measurement.landingFrame===null?'falling':'post_landing';
+    return [
+      p.index+1,phase,measurement.frame,t.toFixed(1),measurement.landingFrame===null?'':measurement.landingFrame,
+      b.position.x.toFixed(3),b.position.y.toFixed(3),
+      (b.velocity.x||0).toFixed(5),(b.velocity.y||0).toFixed(5),
+      (b.speed||0).toFixed(5),(b.angularVelocity||0).toFixed(6),
+      (b.angle||0).toFixed(6),b.isSleeping?'1':'0',contact?'1':'0',
+      Number(pl.debugMass||b.mass||0).toFixed(5),
+      Number(pl.debugInertia||b.inertia||0).toFixed(3),
+      Number(pl.debugComOffset||0).toFixed(3),
+      Number(pl.debugFootprintWidth||0).toFixed(3),
+      Number(pl.debugAspectRatio||0).toFixed(4),
+      Number(pl.debugPartCount||0),
+      Number(pl.debugTriangulatedCount||0),
+      Number(pl.debugRegionCount||0),
+      Number(pl.debugRawRegionCount||0),
+      Number(pl.debugContourVertexCount||0)
+    ].join(',');
+  }
+
+  function measurementStart(){
+    if(!DEBUG_MODE||!images.length||measurement) return;
+    gameOver=true;ready=false;current=null;pieces=[];score=0;spawnAt=0;cameraY=0;towerHeight=0;gameMode=null;
+    if(modeModal) modeModal.classList.add('hidden');
+    if(endButton) endButton.disabled=true;
+    if(measurementButton) measurementButton.disabled=true;
+    if(measurementDownload) measurementDownload.classList.add('hidden');
+    measurement={index:0,frame:0,startedAt:0,landingFrame:null,postLandFrames:0,rows:[],current:null,phase:'falling',allRows:[]};
+    showStatus('自動計測中…');
+    measurementSetStatus('01 / 37 を計測中…');
+    measurementCreatePiece(0);
+  }
+
+  function measurementFinish(){
+    const header='piece,phase,frame,time_ms,landing_frame,x,y,velocity_x,velocity_y,speed,angular_velocity,angle,sleeping,ground_contact,mass,inertia,com_offset_px,footprint_width_px,aspect_ratio,physics_parts,triangles,regions,raw_regions,contour_vertices';
+    const csv='\ufeff'+header+'\n'+measurement.allRows.join('\n')+'\n';
+    const blob=new Blob([csv],{type:'text/csv;charset=utf-8'});
+    const url=URL.createObjectURL(blob);
+    const d=new Date();
+    const stamp=[d.getFullYear(),String(d.getMonth()+1).padStart(2,'0'),String(d.getDate()).padStart(2,'0'),String(d.getHours()).padStart(2,'0'),String(d.getMinutes()).padStart(2,'0'),String(d.getSeconds()).padStart(2,'0')].join('');
+    const filename=`JinSanTowerGame_v23.0_physics_log_${stamp}.csv`;
+    if(measurementDownload){
+      measurementDownload.href=url;measurementDownload.download=filename;measurementDownload.textContent='CSVを保存';measurementDownload.classList.remove('hidden');
+    }
+    try{const a=document.createElement('a');a.href=url;a.download=filename;a.click();}catch(e){}
+    measurementSetStatus(`計測完了：37 / 37 ピース　${measurement.allRows.length} 行`);
+    showStatus('自動計測完了。CSVを保存できます。');
+    if(measurementButton){measurementButton.disabled=false;measurementButton.innerHTML='<strong>再計測</strong><span>同じ条件で全37ピースを再計測</span>';}
+    measurement=null;
+    gameOver=false;
+    ready=false;
+    gameMode=null;
+    if(modeModal) modeModal.classList.remove('hidden');
+    if(normalModeButton) normalModeButton.disabled=false;
+    if(endlessModeButton) endlessModeButton.disabled=false;
+    if(endButton) endButton.disabled=true;
+  }
+
+  function measurementUpdate(){
+    if(!measurement||!measurement.current) return;
+    const p=measurement.current;
+    const b=p.body;
+    const contact=measurementHasGroundContact(b);
+    if(measurement.landingFrame===null&&contact) measurement.landingFrame=measurement.frame;
+    measurement.allRows.push(measurementRow(p,contact));
+    measurement.frame++;
+    if(measurement.landingFrame!==null){
+      measurement.postLandFrames=measurement.frame-measurement.landingFrame;
+      if(measurement.postLandFrames>=MEASUREMENT_POST_LAND_FRAMES){
+        const next=measurement.index+1;
+        if(next>=MEASUREMENT_PIECE_COUNT){measurementFinish();return;}
+        measurement.index=next;
+        measurementSetStatus(`${String(next+1).padStart(2,'0')} / ${MEASUREMENT_PIECE_COUNT} を計測中…`);
+        measurementCreatePiece(next);
+      }
+    }
+    if(measurement.frame>600){
+      // Safety timeout: avoid blocking the whole debug run on an abnormal body.
+      const next=measurement.index+1;
+      if(next>=MEASUREMENT_PIECE_COUNT){measurementFinish();return;}
+      measurement.index=next;
+      measurementSetStatus(`${String(next+1).padStart(2,'0')} / ${MEASUREMENT_PIECE_COUNT} を計測中…（タイムアウト）`);
+      measurementCreatePiece(next);
+    }
+  }
 
   function showStatus(text){status.textContent=text;status.classList.remove("hidden");}
 
@@ -304,6 +441,7 @@ const Game = (() => {
   function update(dt){
     Physics.step(dt);
     Renderer.updateEffects(dt);
+    if(measurement){measurementUpdate();return;}
     if(gameOver) return;
 
     for(const p of pieces){
@@ -327,6 +465,7 @@ const Game = (() => {
     Renderer.clear();
     for(const p of pieces) Renderer.drawPiece(p,cameraY);
     if(current) Renderer.drawPiece(current,cameraY);
+    if(measurement&&measurement.current) Renderer.drawPiece(measurement.current,cameraY);
     Renderer.drawGround(stageH-12,cameraY,baseWidth);
     Renderer.renderEffects(cameraY);
     Renderer.renderDebugTarget(current,pieces);
@@ -405,6 +544,7 @@ const Game = (() => {
       console.error(e);
       if(normalModeButton) normalModeButton.disabled=true;
       if(endlessModeButton) endlessModeButton.disabled=true;
+      if(measurementButton) measurementButton.disabled=true;
       showStatus("画像読み込みエラー: "+e.message);
     }
   }
@@ -414,6 +554,7 @@ const Game = (() => {
   if(normalModeButton) normalModeButton.addEventListener('click',()=>startGame(MODE_NORMAL));
   if(endlessModeButton) endlessModeButton.addEventListener('click',()=>startGame(MODE_ENDLESS));
   if(endButton) endButton.addEventListener('click',endGame);
+  if(measurementButton) measurementButton.addEventListener('click',measurementStart);
   document.addEventListener('pointerdown',unlockAudio,{passive:true});
   document.addEventListener('touchstart',unlockAudio,{passive:true});
 
