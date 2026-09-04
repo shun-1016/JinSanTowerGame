@@ -1,4 +1,4 @@
-/* v20.5 - final landing stability tuning; geometry/image synchronization unchanged */
+/* v21.0 - final v20.5 physics + shorter base */
 const Physics = (() => {
   const {Engine,World,Bodies,Body,Sleeping}=Matter;
   const engine=Engine.create({
@@ -13,9 +13,10 @@ const Physics = (() => {
   const world=engine.world;
   let ground=null;
 
-  function setup(width,groundY){
+  function setup(width,groundY,baseWidth){
     if(ground) World.remove(world,ground);
-    ground=Bodies.rectangle(width/2,groundY+14,Math.max(1000,width*3),28,{
+    const actualBaseWidth=baseWidth||width*0.82;
+    ground=Bodies.rectangle(width/2,groundY+14,actualBaseWidth,28,{
       isStatic:true,label:'ground',friction:0.85,frictionStatic:1,restitution:0
     });
     World.add(world,ground);
