@@ -1,4 +1,4 @@
-/* v21.3 - preload flow fix / mode modal shown before image loading */
+/* v21.4 - UI height unit + haptics compatibility */
 const Game = (() => {
   let images=[];
   let pieces=[];
@@ -25,6 +25,7 @@ const Game = (() => {
   const GAME_OVER_KEY='jinSanTowerGameBestScores';
   const MODE_NORMAL='normal';
   const MODE_ENDLESS='endless';
+  const PIXELS_PER_METER=100;
 
   const params=new URLSearchParams(location.search);
   const DEBUG_MODE=params.get("debug")==="on";
@@ -59,7 +60,7 @@ const Game = (() => {
     const best=getBestScores()[0];
     if(hudScore) hudScore.textContent=String(score);
     if(hudBest) hudBest.textContent=gameMode===MODE_ENDLESS?'—':(best===undefined?'—':String(best));
-    if(hudHeight) hudHeight.textContent=String(Math.max(0,Math.round(towerHeight)));
+    if(hudHeight) hudHeight.textContent=String((Math.max(0,towerHeight)/PIXELS_PER_METER).toFixed(1));
     if(document.getElementById("score")) document.getElementById("score").textContent=`SCORE ${score}`;
   }
 
@@ -120,7 +121,11 @@ const Game = (() => {
     }catch(e){}
   }
 
-  function vibrate(pattern){try{if(navigator.vibrate) navigator.vibrate(pattern)}catch(e){}}
+  function vibrate(pattern){
+    try{
+      if(typeof navigator!=='undefined' && typeof navigator.vibrate==='function') navigator.vibrate(pattern);
+    }catch(e){}
+  }
 
   function hideStatus(){status.classList.add("hidden");}
 
@@ -160,7 +165,7 @@ const Game = (() => {
     const best=shouldRecord?saveScore(score):getBestScores();
     if(resultTitle) resultTitle.textContent=reason==='ended'?'ゲーム終了':'ゲームオーバー';
     if(resultScore) resultScore.textContent=String(score);
-    if(resultHeight) resultHeight.textContent=String(Math.max(0,Math.round(towerHeight)));
+    if(resultHeight) resultHeight.textContent=String((Math.max(0,towerHeight)/PIXELS_PER_METER).toFixed(1));
     if(resultPieces) resultPieces.textContent=String(pieces.length);
     if(newRecord){
       const record=shouldRecord && score>oldBest && score>0;
