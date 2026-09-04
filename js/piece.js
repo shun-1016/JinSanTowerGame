@@ -1,4 +1,4 @@
-/* v21.8.2 - higher-fidelity contours, 36 piece assets, .png/.PNG support */
+/* v21.8.3 - higher-fidelity contours, 36 piece assets, .png/.PNG support */
 const Piece = (() => {
   const MAX_PIECE = 82;
   const ALPHA_THRESHOLD = 32;
@@ -10,7 +10,13 @@ const Piece = (() => {
     return new Promise((resolve,reject)=>{
       const im=new Image();
       im.onload=()=>resolve(im);
-      im.onerror=()=>reject(new Error(`画像を読み込めません: ${src}`));
+      im.onerror=()=>{
+        const alt=src.endsWith(".png")?src.slice(0,-4)+".PNG":src.slice(0,-4)+".png";
+        const retry=new Image();
+        retry.onload=()=>resolve(retry);
+        retry.onerror=()=>reject(new Error(`画像を読み込めません: ${src} / ${alt}`));
+        retry.src=alt;
+      };
       im.src=src;
     });
   }
