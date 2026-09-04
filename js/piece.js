@@ -1,4 +1,4 @@
-/* v21.8.1 - support 36 piece assets and .png/.PNG */
+/* v21.8.2 - higher-fidelity contours, 36 piece assets, .png/.PNG support */
 const Piece = (() => {
   const MAX_PIECE = 82;
   const ALPHA_THRESHOLD = 32;
@@ -9,16 +9,8 @@ const Piece = (() => {
   function load(src){
     return new Promise((resolve,reject)=>{
       const im=new Image();
-      let triedUpper=false;
       im.onload=()=>resolve(im);
-      im.onerror=()=>{
-        if(!triedUpper && src.toLowerCase().endsWith('.png')){
-          triedUpper=true;
-          im.src=src.slice(0,-4)+'.PNG';
-        }else{
-          reject(new Error(`画像を読み込めません: ${src}`));
-        }
-      };
+      im.onerror=()=>reject(new Error(`画像を読み込めません: ${src}`));
       im.src=src;
     });
   }
@@ -144,7 +136,7 @@ const Piece = (() => {
       }
       if(closed&&loop.length>=4){
         let clean=simplifyCollinear(loop);
-        if(clean.length>100) clean=simplifyClosed(clean,0.55);
+        if(clean.length>140) clean=simplifyClosed(clean,0.30);
         if(clean.length>=3){
           const normalized=clean.map(p=>({x:p.x-pw/2,y:p.y-ph/2}));
           if(Math.abs(polygonArea(normalized))>0.05) loops.push(normalized);

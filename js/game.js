@@ -1,4 +1,4 @@
-/* v21.8 - random piece selection with 36 pieces */
+/* v21.8.2 - random piece selection with 36 pieces */
 const Game = (() => {
   let images=[];
   let pieces=[];
@@ -29,6 +29,8 @@ const Game = (() => {
 
   const params=new URLSearchParams(location.search);
   const DEBUG_MODE=params.get("debug")==="on";
+  const shapeDebugEl=document.getElementById("shapeDebug");
+  if(shapeDebugEl) shapeDebugEl.classList.toggle("hidden",!DEBUG_MODE);
   const debugPieceParam=params.get("piece");
   const DEBUG_PIECE_INDEX=(debugPieceParam && /^\d{1,2}$/.test(debugPieceParam))
     ? Math.max(0,Math.min(35,parseInt(debugPieceParam,10)-1)) : null;
