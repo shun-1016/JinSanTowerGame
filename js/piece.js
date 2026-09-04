@@ -1,8 +1,9 @@
-/* v20.3 - automatic alpha-contour analysis / triangulation diagnostics */
+/* v21.8 - support 36 piece assets */
 const Piece = (() => {
   const MAX_PIECE = 82;
   const ALPHA_THRESHOLD = 32;
-  const paths = Array.from({length:21}, (_,i) => `assets/${String(i+1).padStart(2,"0")}.png`);
+  const PIECE_COUNT = 36;
+  const paths = Array.from({length:PIECE_COUNT}, (_,i) => `assets/${String(i+1).padStart(2,"0")}.png`);
   const shapeCache = new WeakMap();
 
   function load(src){
@@ -80,8 +81,6 @@ const Piece = (() => {
     const solid=new Uint8Array(pw*ph);
     for(let i=0;i<solid.length;i++) solid[i]=alpha[i*4+3]>=ALPHA_THRESHOLD?1:0;
 
-    // Build every boundary edge explicitly. Each solid pixel contributes
-    // only the sides that touch transparent/outside pixels.
     const outgoing=new Map();
     const edges=[];
     const key=(x,y)=>`${x},${y}`;
@@ -101,26 +100,17 @@ const Piece = (() => {
       if(x===0||!solid[y*pw+x-1]) add(x,y+1,x,y);
     }
 
-    // At ordinary pixel corners there is one continuation. At ambiguous
-    // touching corners there can be several. Pick the continuation that
-    // keeps the filled region on the same side of the boundary. This is a
-    // deterministic planar-edge walk and avoids the old arbitrary pop().
     function chooseNext(cur,prev){
       const list=outgoing.get(key(cur.x,cur.y))||[];
       const candidates=list.filter(e=>!e.used);
       if(!candidates.length) return null;
       if(!prev) return candidates[0];
-
       const dx=cur.x-prev.x,dy=cur.y-prev.y;
       let best=null,bestScore=Infinity;
       for(const e of candidates){
         const ex=e.b.x-cur.x,ey=e.b.y-cur.y;
-        // Angle measured clockwise in screen coordinates. Straight=0,
-        // right turn=pi/2. Prefer the smallest clockwise turn; a U-turn
-        // is last resort and is normally excluded by the used-edge state.
         let turn=Math.atan2(ey,ex)-Math.atan2(dy,dx);
         while(turn<0) turn+=Math.PI*2;
-        // Screen coordinates invert the usual visual clockwise convention.
         turn=(Math.PI*2-turn)%(Math.PI*2);
         if(turn<bestScore){bestScore=turn;best=e;}
       }
@@ -146,9 +136,6 @@ const Piece = (() => {
       }
       if(closed&&loop.length>=4){
         let clean=simplifyCollinear(loop);
-        // Keep the existing contour simplification threshold, but only
-        // simplify a valid closed loop. The topology must be established
-        // before RDP is applied.
         if(clean.length>100) clean=simplifyClosed(clean,0.55);
         if(clean.length>=3){
           const normalized=clean.map(p=>({x:p.x-pw/2,y:p.y-ph/2}));
