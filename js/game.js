@@ -265,13 +265,19 @@ const Game = (() => {
 
   function pieceHasFallenOutsideBase(p){
     const b=p.body;
-    // A piece is considered to have fallen once its whole body is below the
-    // top surface. This avoids ending the game merely because a piece is
-    // temporarily overhanging the edge while still supported by the base.
+    // v22.6: judge the visible fall rather than requiring the whole AABB to
+    // clear the base. A tilted/long piece can keep one corner inside the base
+    // even after it has clearly fallen off the side.
     const groundY=stageH-12;
-    const belowSurface=b.bounds.min.y>groundY+8;
-    const outside=b.bounds.max.x<baseLeft || b.bounds.min.x>baseRight;
-    return belowSurface && outside;
+    const overlap=Math.max(0,Math.min(b.bounds.max.x,baseRight)-Math.max(b.bounds.min.x,baseLeft));
+    const bw=Math.max(1,b.bounds.max.x-b.bounds.min.x);
+    const overlapRatio=overlap/bw;
+    const belowSurface=b.bounds.min.y>groundY+2 || b.position.y>groundY+Math.max(8,p.h*0.20);
+    const clearlyOutside=overlapRatio<0.12;
+    const fallingOutside=clearlyOutside && belowSurface;
+    b.plugin=b.plugin||{};
+    b.plugin.gameOverOutsideFrames=fallingOutside?(b.plugin.gameOverOutsideFrames||0)+1:0;
+    return b.plugin.gameOverOutsideFrames>=3;
   }
 
   const CAMERA_TRIGGER=0.52;

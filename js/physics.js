@@ -416,7 +416,22 @@ const Physics = (() => {
       x:poly.reduce((sum,p)=>sum+p.x,0)/poly.length,
       y:poly.reduce((sum,p)=>sum+p.y,0)/poly.length
     }));
+    const comOffset=body.plugin&&body.plugin.imageVisualOffset?body.plugin.imageVisualOffset:{x:0,y:0};
+    const allVerts=(body.parts||[]).slice(1).flatMap(part=>part.vertices||[]);
+    let footprintWidth=0;
+    if(allVerts.length){
+      const maxY=Math.max(...allVerts.map(p=>p.y));
+      const bottom=allVerts.filter(p=>p.y>=maxY-1.0);
+      if(bottom.length) footprintWidth=Math.max(...bottom.map(p=>p.x))-Math.min(...bottom.map(p=>p.x));
+    }
     body.plugin.debugPartCount=body.parts&&body.parts.length>1?body.parts.length-1:body.parts.length;
+    body.plugin.debugMass=body.mass;
+    body.plugin.debugInertia=body.inertia;
+    body.plugin.debugComOffsetX=comOffset.x;
+    body.plugin.debugComOffsetY=comOffset.y;
+    body.plugin.debugComOffset=Math.hypot(comOffset.x,comOffset.y);
+    body.plugin.debugFootprintWidth=footprintWidth;
+    body.plugin.debugAspectRatio=Math.max(w,h)/Math.max(1,Math.min(w,h));
     return body;
   }
 
