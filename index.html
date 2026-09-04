@@ -10,7 +10,7 @@
 <body>
   <header class="header">
     <h1>JinSan Tower Game</h1>
-    <div class="headerRight"><span id="version">v21.2</span><button id="endButton" class="endButton" type="button">終了</button></div>
+    <div class="headerRight"><span id="version">v21.4</span><button id="endButton" class="endButton" type="button">終了</button></div>
   </header>
   <main>
     <div class="stage">
@@ -19,7 +19,7 @@
         <div class="scorePanel">
           <div><span class="hudLabel">SCORE</span><strong id="hudScore">0</strong></div>
           <div><span class="hudLabel">BEST</span><strong id="hudBest">—</strong></div>
-          <div><span class="hudLabel">HEIGHT</span><strong id="hudHeight">0</strong><small>px</small></div>
+          <div><span class="hudLabel">HEIGHT</span><strong id="hudHeight">0.0</strong><small>m</small></div>
         </div>
         <div id="nextPanel" class="nextPanel">
           <span class="nextLabel">NEXT</span>
@@ -48,7 +48,7 @@
           <div id="newRecord" class="newRecord hidden">NEW RECORD!</div>
           <p class="resultLabel">今回のスコア</p>
           <div id="resultScore" class="resultScore">0</div>
-          <div class="resultStats"><span>高さ <strong id="resultHeight">0</strong>px</span><span>積み上げ <strong id="resultPieces">0</strong>個</span></div>
+          <div class="resultStats"><span>高さ <strong id="resultHeight">0.0</strong>m</span><span>積み上げ <strong id="resultPieces">0</strong>個</span></div>
           <p class="bestTitle">歴代ベスト3</p>
           <ol id="bestScores" class="bestScores"></ol>
           <button id="restartButton" class="restartButton" type="button">もう一度遊ぶ</button>
@@ -56,9 +56,9 @@
       </div>
     </div>
     <div class="controls">
-      <button id="rotateLeft" type="button" aria-label="左回転"><span class="buttonIcon">↶</span><span class="buttonText">左回転</span></button>
+      <button id="rotateLeft" type="button" aria-label="左回転"><span class="buttonText">左回転</span></button>
       <button id="drop" type="button"><span class="buttonIcon dropIcon">▼</span><span class="buttonText">落とす</span></button>
-      <button id="rotateRight" type="button" aria-label="右回転"><span class="buttonIcon">↷</span><span class="buttonText">右回転</span></button>
+      <button id="rotateRight" type="button" aria-label="右回転"><span class="buttonText">右回転</span></button>
     </div>
   </main>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.20.0/matter.min.js"></script>
