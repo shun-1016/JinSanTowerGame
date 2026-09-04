@@ -1,8 +1,8 @@
-/* v21.8.4 - contour cleanup/smoothing, 36 piece assets, .png/.PNG support */
+/* v22.0 - hole-aware contour cleanup, stable geometry, 37 piece assets, .png/.PNG support */
 const Piece = (() => {
   const MAX_PIECE = 82;
   const ALPHA_THRESHOLD = 96;
-  const PIECE_COUNT = 36;
+  const PIECE_COUNT = 37;
   const paths = Array.from({length:PIECE_COUNT}, (_,i) => `assets/${String(i+1).padStart(2,"0")}.png`);
   const shapeCache = new WeakMap();
 
@@ -83,7 +83,82 @@ const Piece = (() => {
     return out.length>=3?out:points.slice();
   }
 
-  function extractOuterContour(alpha,pw,ph){
+  function pointInPolygon(p,poly){
+    let inside=false;
+    for(let i=0,j=poly.length-1;i<poly.length;j=i++){
+      const a=poly[i],b=poly[j];
+      if(((a.y>p.y)!=(b.y>p.y)) &&
+         p.x < (b.x-a.x)*(p.y-a.y)/(b.y-a.y)+a.x) inside=!inside;
+    }
+    return inside;
+  }
+
+  function onSegment(p,a,b){
+    return Math.abs((b.x-a.x)*(p.y-a.y)-(b.y-a.y)*(p.x-a.x))<1e-7 &&
+      p.x>=Math.min(a.x,b.x)-1e-7 && p.x<=Math.max(a.x,b.x)+1e-7 &&
+      p.y>=Math.min(a.y,b.y)-1e-7 && p.y<=Math.max(a.y,b.y)+1e-7;
+  }
+
+  function segmentsIntersect(a,b,c,d){
+    const c1=(b.x-a.x)*(c.y-a.y)-(b.y-a.y)*(c.x-a.x);
+    const c2=(b.x-a.x)*(d.y-a.y)-(b.y-a.y)*(d.x-a.x);
+    const c3=(d.x-c.x)*(a.y-c.y)-(d.y-c.y)*(a.x-c.x);
+    const c4=(d.x-c.x)*(b.y-c.y)-(d.y-c.y)*(b.x-c.x);
+    const crossOpp=(c1>1e-7&&c2<-1e-7 || c1<-1e-7&&c2>1e-7) &&
+      (c3>1e-7&&c4<-1e-7 || c3<-1e-7&&c4>1e-7);
+    if(crossOpp) return true;
+    return onSegment(c,a,b)||onSegment(d,a,b)||onSegment(a,c,d)||onSegment(b,c,d);
+  }
+
+  function bridgeHole(outer,hole,otherHoles){
+    // Pick the rightmost hole vertex.  Connecting it to a visible outer
+    // vertex converts the polygon-with-hole into a simple polygon that the
+    // existing ear-clipping triangulator can handle without filling the hole.
+    let hi=0;
+    for(let i=1;i<hole.length;i++){
+      if(hole[i].x>hole[hi].x || (hole[i].x===hole[hi].x&&hole[i].y<hole[hi].y)) hi=i;
+    }
+    const h=hole[hi];
+    const candidates=outer.map((v,i)=>({v,i,d:(v.x-h.x)*(v.x-h.x)+(v.y-h.y)*(v.y-h.y)}))
+      .filter(c=>c.v.x>=h.x-1e-7)
+      .sort((a,b)=>a.d-b.d);
+
+    for(const c of candidates){
+      const v=c.v;
+      const mid={x:(h.x+v.x)/2,y:(h.y+v.y)/2};
+      if(!pointInPolygon(mid,outer)) continue;
+
+      let bad=false;
+      for(let i=0;i<outer.length;i++){
+        const a=outer[i],b=outer[(i+1)%outer.length];
+        if(i===c.i || (i+1)%outer.length===c.i) continue;
+        if(segmentsIntersect(h,v,a,b)){bad=true;break;}
+      }
+      if(bad) continue;
+
+      for(const oh of [hole,...otherHoles]){
+        for(let i=0;i<oh.length;i++){
+          const a=oh[i],b=oh[(i+1)%oh.length];
+          if(oh===hole && (i===hi || (i+1)%oh.length===hi)) continue;
+          if(segmentsIntersect(h,v,a,b)){bad=true;break;}
+        }
+        if(bad) break;
+      }
+      if(bad) continue;
+
+      const merged=[];
+      for(let i=0;i<=c.i;i++) merged.push(outer[i]);
+      merged.push(h);
+      for(let k=1;k<hole.length;k++) merged.push(hole[(hi+k)%hole.length]);
+      merged.push(h);
+      merged.push(v);
+      for(let i=c.i+1;i<outer.length;i++) merged.push(outer[i]);
+      return merged;
+    }
+    return null;
+  }
+
+  function extractContours(alpha,pw,ph){
     const solid=new Uint8Array(pw*ph);
     for(let i=0;i<solid.length;i++) solid[i]=alpha[i*4+3]>=ALPHA_THRESHOLD?1:0;
 
@@ -142,23 +217,42 @@ const Piece = (() => {
       }
       if(closed&&loop.length>=4){
         let clean=simplifyCollinear(loop);
-        // The alpha mask is sampled at a maximum size of 82px.  A very small
-        // RDP epsilon preserves the raster staircase as hundreds of tiny
-        // corners, which then becomes many tiny physical parts.  Simplify
-        // progressively so complex silhouettes keep their broad shape while
-        // eliminating pixel-level zigzags that add no useful collision detail.
         if(clean.length>80) clean=simplifyClosed(clean,0.85);
         if(clean.length>110) clean=simplifyClosed(clean,1.10);
         if(clean.length>140) clean=simplifyClosed(clean,1.35);
         if(clean.length>=3){
           const normalized=clean.map(p=>({x:p.x-pw/2,y:p.y-ph/2}));
-          if(Math.abs(polygonArea(normalized))>0.05) loops.push(normalized);
+          const a=polygonArea(normalized);
+          if(Math.abs(a)>0.05) loops.push({poly:normalized,area:a});
         }
       }
     }
-    if(!loops.length) return [];
-    loops.sort((a,b)=>Math.abs(polygonArea(b))-Math.abs(polygonArea(a)));
-    return loops[0];
+
+    if(!loops.length) return {contour:[],debugContours:[],pointCount:0,holeCount:0};
+    loops.sort((a,b)=>Math.abs(b.area)-Math.abs(a.area));
+
+    const outer=loops[0].poly;
+    const holes=loops.slice(1).filter(x=>x.area<0 && Math.abs(x.area)>=6).map(x=>x.poly);
+    let merged=outer.slice();
+    const remaining=holes.slice().sort((a,b)=>{
+      const ax=Math.max(...a.map(p=>p.x)),bx=Math.max(...b.map(p=>p.x));
+      return bx-ax;
+    });
+    let bridgeFailed=false;
+    while(remaining.length){
+      const hole=remaining.shift();
+      const bridged=bridgeHole(merged,hole,remaining);
+      if(bridged) merged=bridged;
+      else bridgeFailed=true;
+    }
+
+    return {
+      contour:merged,
+      debugContours:[outer,...holes],
+      pointCount:merged.length,
+      holeCount:holes.length,
+      bridgeFailed
+    };
   }
 
   function analyzeShape(im,w,h){
@@ -171,8 +265,8 @@ const Piece = (() => {
     ctx.clearRect(0,0,pw,ph);
     ctx.drawImage(im,0,0,pw,ph);
     const data=ctx.getImageData(0,0,pw,ph).data;
-    const contour=extractOuterContour(data,pw,ph);
-    const result={w,h,contour,debugContours:contour?[contour]:[],pointCount:contour?contour.length:0};
+    const extracted=extractContours(data,pw,ph);
+    const result={w,h,contour:extracted.contour,debugContours:extracted.debugContours,pointCount:extracted.pointCount,holeCount:extracted.holeCount,bridgeFailed:extracted.bridgeFailed};
     shapeCache.set(im,result);
     return result;
   }
