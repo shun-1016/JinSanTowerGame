@@ -1,4 +1,4 @@
-/* v22.1 - v20.5 stable physics + opaque-region compound geometry */
+/* v22.2 - v20.5 physics + reduced opaque-region compound parts */
 const Physics = (() => {
   const {Engine,World,Bodies,Body,Sleeping}=Matter;
   const engine=Engine.create({
@@ -256,6 +256,44 @@ const Physics = (() => {
     return polys;
   }
 
+  function mergeRegionPolys(regions){
+    // v22.2: reduce compound-body part count before triangulation. The B案
+    // regions are axis-aligned opaque rectangles. Merge only regions that
+    // share a complete edge and whose union remains convex. This preserves
+    // transparent gaps and the visible silhouette, while removing internal
+    // seams that otherwise become many tiny Matter.js collision parts.
+    let polys=regions.map(r=>r.map(p=>({x:p.x,y:p.y})));
+    let changed=true;
+    while(changed){
+      changed=false;
+      outer:
+      for(let i=0;i<polys.length;i++){
+        for(let j=i+1;j<polys.length;j++){
+          const a=polys[i],b=polys[j];
+          let shared=false;
+          for(let ai=0;ai<a.length&&!shared;ai++){
+            const a1=a[ai],a2=a[(ai+1)%a.length];
+            for(let bj=0;bj<b.length;bj++){
+              const b1=b[bj],b2=b[(bj+1)%b.length];
+              if(samePointExact(a1,b2)&&samePointExact(a2,b1)){
+                shared=true;
+                break;
+              }
+            }
+          }
+          if(!shared) continue;
+          const merged=mergeTwoConvexPolys(a,b);
+          if(!merged) continue;
+          polys[i]=merged;
+          polys.splice(j,1);
+          changed=true;
+          break outer;
+        }
+      }
+    }
+    return polys;
+  }
+
   function createPieceBody(x,y,w,h,shape){
     const options={
       label:'piece',
@@ -271,7 +309,8 @@ const Physics = (() => {
     // Build the collision body from multiple opaque regions generated from
     // the alpha mask. This avoids the fragile "outer contour + hole bridge"
     // conversion used by v22.0. Transparent areas are never filled.
-    const regions=(shape&&Array.isArray(shape.regions))?shape.regions:[];
+    const rawRegions=(shape&&Array.isArray(shape.regions))?shape.regions:[];
+    const regions=rawRegions.length?mergeRegionPolys(rawRegions):[];
     const allTriangles=[];
     let failed=false;
     let failReason='NONE';
@@ -355,6 +394,7 @@ const Physics = (() => {
     body.plugin.debugBodyCreated=true;
     body.plugin.debugHoleCount=shape&&shape.holeCount||0;
     body.plugin.debugRegionCount=regions.length;
+    body.plugin.debugRawRegionCount=rawRegions.length;
     body.plugin.debugPartCentroids=convexPolys.map(poly=>({
       x:poly.reduce((sum,p)=>sum+p.x,0)/poly.length,
       y:poly.reduce((sum,p)=>sum+p.y,0)/poly.length
