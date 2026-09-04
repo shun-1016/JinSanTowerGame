@@ -1,4 +1,4 @@
-/* v22.3 - v22.2 geometry + landing rotation damping / stack settling */
+/* v22.4 - v22.1 geometry + aggressive landing / stack stabilization */
 const Physics = (() => {
   const {Engine,World,Bodies,Body,Sleeping}=Matter;
   const engine=Engine.create({
@@ -297,12 +297,13 @@ const Physics = (() => {
   function createPieceBody(x,y,w,h,shape){
     const options={
       label:'piece',
-      friction:0.82,
-      frictionStatic:0.95,
-      frictionAir:0.014,
+      friction:0.45,
+      frictionStatic:0.55,
+      frictionAir:0.020,
       restitution:0,
       density:0.002,
-      sleepThreshold:20
+      sleepThreshold:12,
+      slop:0.08
     };
 
     // v22.1 B案:
@@ -444,49 +445,76 @@ const Physics = (() => {
   function step(dt){
     Engine.update(engine,Math.max(1,Math.min(33,dt*1000)));
 
-    // v22.3: collision response can create a large angular impulse even when
-    // the released piece itself had zero angular velocity. Keep that impulse
-    // bounded, especially during the first part of the landing phase.
-    // The visible rotation control is unaffected because rotate() explicitly
-    // zeroes angular velocity after each manual rotation.
+    // v22.4: the remaining instability is treated as a collision-response
+    // problem, not a contour problem.  Matter.js correctly allows angular
+    // impulse and velocity changes on contact, but for this game the desired
+    // behaviour is a soft, almost non-bouncy landing followed by a rigid stack.
+    // We therefore damp bodies that actually participated in a collision,
+    // rather than globally suppressing rotation while they are falling.
+    const contactPieces=new Set();
+    for(const pair of engine.pairs.list){
+      if(!pair.isActive) continue;
+      const a=pair.bodyA&&pair.bodyA.parent?pair.bodyA.parent:pair.bodyA;
+      const b=pair.bodyB&&pair.bodyB.parent?pair.bodyB.parent:pair.bodyB;
+      if(a&&a.label==='piece'&&!a.isStatic) contactPieces.add(a);
+      if(b&&b.label==='piece'&&!b.isStatic) contactPieces.add(b);
+    }
+
     const bodies=world.bodies;
     for(const body of bodies){
       if(body.isStatic || body.label!=='piece') continue;
       body.plugin=body.plugin||{};
-      if(!body.isSleeping){
-        body.plugin.releaseFrames=(body.plugin.releaseFrames||0)+1;
-        const early=body.plugin.releaseFrames<=45;
-        const maxAngular=early?0.060:0.090;
-        const av=body.angularVelocity||0;
-        // Mild angular damping prevents repeated solver impulses from
-        // accumulating into visible spinning without freezing rotation.
-        const damped=av*0.90;
-        const clamped=Math.max(-maxAngular,Math.min(maxAngular,damped));
-        if(Math.abs(clamped-av)>1e-7) Body.setAngularVelocity(body,clamped);
-      }else{
-        body.plugin.releaseFrames=0;
-        body.plugin.settleFrames=0;
-        continue;
-      }
 
-      // Matter.js can wake sleeping stack members when a moving body collides
-      // with them. Re-sleep low-motion members quickly so tiny contact
-      // corrections do not propagate as prolonged stack vibration.
-      const speed=body.speed||0;
-      const angularSpeed=body.angularSpeed||0;
-      if(speed<0.035 && angularSpeed<0.0025){
-        body.plugin.settleFrames=(body.plugin.settleFrames||0)+1;
-        if(body.plugin.settleFrames>=4){
-          Body.setVelocity(body,{x:0,y:0});
-          Body.setAngularVelocity(body,0);
-          Sleeping.set(body,true);
+      const inContact=contactPieces.has(body);
+      if(inContact){
+        body.plugin.contactFrames=(body.plugin.contactFrames||0)+1;
+        body.plugin.releaseFrames=0;
+
+        // Strong first-contact damping.  This specifically kills the
+        // collision-generated spin and repeated vertical bounce while still
+        // allowing ordinary airborne rotation to behave normally.
+        const vx=body.velocity.x||0;
+        const vy=body.velocity.y||0;
+        const av=body.angularVelocity||0;
+        const landingPhase=body.plugin.contactFrames<=8;
+        const linearDamp=landingPhase?0.12:0.55;
+        const angularDamp=landingPhase?0.16:0.55;
+        const ny=vy>0?vy*linearDamp:vy*0.45;
+        Body.setVelocity(body,{x:vx*0.88,y:Math.abs(ny)<0.025?0:ny});
+        Body.setAngularVelocity(body,Math.abs(av*angularDamp)<0.0015?0:av*angularDamp);
+
+        // Once contact motion is genuinely small, lock the body into the
+        // stack.  A later collision can wake it through Matter.js normally.
+        const speed=body.speed||0;
+        const angularSpeed=body.angularSpeed||0;
+        if(speed<0.045 && angularSpeed<0.0035){
+          body.plugin.settleFrames=(body.plugin.settleFrames||0)+1;
+          if(body.plugin.settleFrames>=3){
+            Body.setVelocity(body,{x:0,y:0});
+            Body.setAngularVelocity(body,0);
+            Sleeping.set(body,true);
+            body.plugin.settleFrames=0;
+            body.plugin.contactFrames=0;
+          }
+        }else{
           body.plugin.settleFrames=0;
-          body.plugin.releaseFrames=0;
         }
       }else{
+        body.plugin.contactFrames=0;
         body.plugin.settleFrames=0;
+        body.plugin.releaseFrames=(body.plugin.releaseFrames||0)+1;
+
+        // No global angular clamp: airborne pieces retain natural rotation.
+        // Only a very mild air damping is applied to prevent numerical growth.
+        if(!body.isSleeping){
+          const av=body.angularVelocity||0;
+          if(Math.abs(av)>0.18) Body.setAngularVelocity(body,av*0.96);
+        }else{
+          body.plugin.releaseFrames=0;
+        }
       }
     }
   }
+
   return {engine,world,setup,createPieceBody,add,hold,release,move,rotate,step};
 })();
