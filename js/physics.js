@@ -1,4 +1,4 @@
-/* v22.4 - v22.1 geometry + aggressive landing / stack stabilization */
+/* v22.5 - v22.1 geometry + moderate landing stabilization + normal game-over fix */
 const Physics = (() => {
   const {Engine,World,Bodies,Body,Sleeping}=Matter;
   const engine=Engine.create({
@@ -12,13 +12,29 @@ const Physics = (() => {
   engine.gravity.x=0;engine.gravity.y=1;engine.gravity.scale=0.001;
   const world=engine.world;
   let ground=null;
+  let sideWalls=[];
 
-  function setup(width,groundY){
+  function setup(width,groundY,baseWidth=width,isEndless=false){
     if(ground) World.remove(world,ground);
-    ground=Bodies.rectangle(width/2,groundY+14,Math.max(1000,width*3),28,{
+    if(sideWalls.length){
+      World.remove(world,sideWalls);
+      sideWalls=[];
+    }
+    const bw=Math.max(100,baseWidth);
+    const left=(width-bw)/2;
+    const right=left+bw;
+    ground=Bodies.rectangle((left+right)/2,groundY+14,bw,28,{
       isStatic:true,label:'ground',friction:0.85,frictionStatic:1,restitution:0
     });
     World.add(world,ground);
+    if(isEndless){
+      const wallH=2000;
+      sideWalls=[
+        Bodies.rectangle(left-14,groundY-wallH/2,28,wallH,{isStatic:true,label:'side-wall',friction:0.8,frictionStatic:1,restitution:0}),
+        Bodies.rectangle(right+14,groundY-wallH/2,28,wallH,{isStatic:true,label:'side-wall',friction:0.8,frictionStatic:1,restitution:0})
+      ];
+      World.add(world,sideWalls);
+    }
   }
 
   function cross(a,b,c){return (b.x-a.x)*(c.y-a.y)-(b.y-a.y)*(c.x-a.x);}
@@ -297,13 +313,13 @@ const Physics = (() => {
   function createPieceBody(x,y,w,h,shape){
     const options={
       label:'piece',
-      friction:0.45,
-      frictionStatic:0.55,
-      frictionAir:0.020,
+      friction:0.55,
+      frictionStatic:0.70,
+      frictionAir:0.015,
       restitution:0,
       density:0.002,
-      sleepThreshold:12,
-      slop:0.08
+      sleepThreshold:60,
+      slop:0.05
     };
 
     // v22.1 B案:
@@ -445,12 +461,10 @@ const Physics = (() => {
   function step(dt){
     Engine.update(engine,Math.max(1,Math.min(33,dt*1000)));
 
-    // v22.4: the remaining instability is treated as a collision-response
-    // problem, not a contour problem.  Matter.js correctly allows angular
-    // impulse and velocity changes on contact, but for this game the desired
-    // behaviour is a soft, almost non-bouncy landing followed by a rigid stack.
-    // We therefore damp bodies that actually participated in a collision,
-    // rather than globally suppressing rotation while they are falling.
+    // v22.5: keep the natural Matter.js sleep behaviour and only soften the
+    // first moments of an actual contact. v22.4 stopped bodies too early,
+    // which could freeze a piece in an unstable pose. Here we avoid forcing
+    // Sleep entirely; Matter.js can settle the body naturally.
     const contactPieces=new Set();
     for(const pair of engine.pairs.list){
       if(!pair.isActive) continue;
@@ -460,55 +474,36 @@ const Physics = (() => {
       if(b&&b.label==='piece'&&!b.isStatic) contactPieces.add(b);
     }
 
-    const bodies=world.bodies;
-    for(const body of bodies){
+    for(const body of world.bodies){
       if(body.isStatic || body.label!=='piece') continue;
       body.plugin=body.plugin||{};
-
       const inContact=contactPieces.has(body);
+
       if(inContact){
         body.plugin.contactFrames=(body.plugin.contactFrames||0)+1;
         body.plugin.releaseFrames=0;
 
-        // Strong first-contact damping.  This specifically kills the
-        // collision-generated spin and repeated vertical bounce while still
-        // allowing ordinary airborne rotation to behave normally.
         const vx=body.velocity.x||0;
         const vy=body.velocity.y||0;
         const av=body.angularVelocity||0;
-        const landingPhase=body.plugin.contactFrames<=8;
-        const linearDamp=landingPhase?0.12:0.55;
-        const angularDamp=landingPhase?0.16:0.55;
-        const ny=vy>0?vy*linearDamp:vy*0.45;
-        Body.setVelocity(body,{x:vx*0.88,y:Math.abs(ny)<0.025?0:ny});
-        Body.setAngularVelocity(body,Math.abs(av*angularDamp)<0.0015?0:av*angularDamp);
+        const f=body.plugin.contactFrames;
 
-        // Once contact motion is genuinely small, lock the body into the
-        // stack.  A later collision can wake it through Matter.js normally.
-        const speed=body.speed||0;
-        const angularSpeed=body.angularSpeed||0;
-        if(speed<0.045 && angularSpeed<0.0035){
-          body.plugin.settleFrames=(body.plugin.settleFrames||0)+1;
-          if(body.plugin.settleFrames>=3){
-            Body.setVelocity(body,{x:0,y:0});
-            Body.setAngularVelocity(body,0);
-            Sleeping.set(body,true);
-            body.plugin.settleFrames=0;
-            body.plugin.contactFrames=0;
-          }
-        }else{
-          body.plugin.settleFrames=0;
-        }
+        // Moderate impact damping. The first few frames absorb most of the
+        // collision energy, but never overwrite the angle or force Sleep.
+        const linearDamp=f<=6?0.38:0.78;
+        const angularDamp=f<=6?0.42:0.78;
+        const ny=vy>0?vy*linearDamp:vy*0.55;
+        Body.setVelocity(body,{x:vx*0.94,y:Math.abs(ny)<0.012?0:ny});
+        Body.setAngularVelocity(body,Math.abs(av*angularDamp)<0.0008?0:av*angularDamp);
       }else{
         body.plugin.contactFrames=0;
-        body.plugin.settleFrames=0;
         body.plugin.releaseFrames=(body.plugin.releaseFrames||0)+1;
 
-        // No global angular clamp: airborne pieces retain natural rotation.
-        // Only a very mild air damping is applied to prevent numerical growth.
+        // Airborne pieces are intentionally not rotation-clamped.
+        // A small global cap prevents numerical runaway only in extreme cases.
         if(!body.isSleeping){
           const av=body.angularVelocity||0;
-          if(Math.abs(av)>0.18) Body.setAngularVelocity(body,av*0.96);
+          if(Math.abs(av)>0.35) Body.setAngularVelocity(body,av*0.98);
         }else{
           body.plugin.releaseFrames=0;
         }
