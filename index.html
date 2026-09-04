@@ -10,7 +10,7 @@
 <body>
   <header class="header">
     <h1>JinSan Tower Game</h1>
-    <div class="headerRight"><span id="version">v21.1</span><span id="score">SCORE 0</span></div>
+    <div class="headerRight"><span id="version">v21.2</span><button id="endButton" class="endButton" type="button">終了</button></div>
   </header>
   <main>
     <div class="stage">
@@ -27,7 +27,21 @@
         </div>
       </div>
       <div id="status" class="status">読み込み中…</div>
-      <div id="shapeDebug" class="shapeDebug">輪郭解析: 待機中</div>
+      <div id="shapeDebug" class="shapeDebug hidden">輪郭解析: 待機中</div>
+      <div id="modeModal" class="modeModal">
+        <div class="modeCard">
+          <h2>ゲームモード</h2>
+          <p>遊び方を選択してください</p>
+          <button id="normalModeButton" class="modeButton normalModeButton" type="button">
+            <strong>通常モード</strong>
+            <span>土台の外へ落ちるとゲームオーバー</span>
+          </button>
+          <button id="endlessModeButton" class="modeButton endlessModeButton" type="button">
+            <strong>エンドレスモード</strong>
+            <span>左右の壁で落下を防ぎ、どこまでも積み上げる</span>
+          </button>
+        </div>
+      </div>
       <div id="resultScreen" class="resultScreen hidden">
         <div class="resultCard">
           <h2>ゲームオーバー</h2>
