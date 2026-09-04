@@ -8,11 +8,19 @@
   <link rel="apple-touch-icon" href="assets/icon.png">
   <title>仁さんタワー</title>
   <link rel="stylesheet" href="style.css">
+
+<style>
+.measurementDebug{margin-top:14px;padding-top:14px;border-top:1px solid rgba(0,0,0,.12)}
+.measurementTitle{font-weight:700;margin-bottom:5px}
+.measurementStatus{font-size:12px;line-height:1.45;margin-bottom:8px;opacity:.8}
+.measurementButton{margin-top:0}
+.measurementDownload{display:block;margin-top:8px;text-align:center;font-weight:700;text-decoration:none;padding:10px;border-radius:10px;background:#fff;color:inherit;border:1px solid rgba(0,0,0,.18)}
+</style>
 </head>
 <body>
   <header class="header">
     <h1>JinSan Tower Game</h1>
-    <div class="headerRight"><span id="version">v22.6</span><button id="endButton" class="endButton" type="button">終了</button></div>
+    <div class="headerRight"><span id="version">v23.0</span><button id="endButton" class="endButton" type="button">終了</button></div>
   </header>
   <main>
     <div class="stage">
@@ -42,6 +50,15 @@
             <strong>エンドレスモード</strong>
             <span>左右の壁で落下を防ぎ、どこまでも積み上げる</span>
           </button>
+          <div id="measurementDebug" class="measurementDebug hidden">
+            <div class="measurementTitle">物理挙動デバッグ</div>
+            <div id="measurementStatus" class="measurementStatus">全37ピースを単独で自動計測します</div>
+            <button id="measurementButton" class="modeButton measurementButton" type="button">
+              <strong>全37ピース自動計測</strong>
+              <span>落下〜着地＋着地後を記録してCSV出力</span>
+            </button>
+            <a id="measurementDownload" class="measurementDownload hidden" download>CSVを保存</a>
+          </div>
         </div>
       </div>
       <div id="resultScreen" class="resultScreen hidden">
