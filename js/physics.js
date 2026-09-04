@@ -1,4 +1,4 @@
-/* v22.2 - v20.5 physics + reduced opaque-region compound parts */
+/* v22.3 - v22.2 geometry + landing rotation damping / stack settling */
 const Physics = (() => {
   const {Engine,World,Bodies,Body,Sleeping}=Matter;
   const engine=Engine.create({
@@ -417,6 +417,7 @@ const Physics = (() => {
     Sleeping.set(body,false);
     body.plugin=body.plugin||{};
     body.plugin.settleFrames=0;
+    body.plugin.releaseFrames=0;
     // Do not inject an artificial downward velocity. Gravity alone starts
     // the fall, which avoids an extra impulse at the moment of release.
     Body.setVelocity(body,{x:0,y:0});
@@ -428,6 +429,7 @@ const Physics = (() => {
     Body.setAngularVelocity(body,0);
     body.plugin=body.plugin||{};
     body.plugin.settleFrames=0;
+    body.plugin.releaseFrames=0;
     Sleeping.set(body,true);
   }
   function rotate(body,delta){
@@ -436,34 +438,50 @@ const Physics = (() => {
     Body.setAngularVelocity(body,0);
     body.plugin=body.plugin||{};
     body.plugin.settleFrames=0;
+    body.plugin.releaseFrames=0;
     Sleeping.set(body,true);
   }
   function step(dt){
     Engine.update(engine,Math.max(1,Math.min(33,dt*1000)));
 
-    // Matter.js sleeping is based on near-zero motion, but a compound body
-    // can be repeatedly awakened by tiny contact corrections. Once a released
-    // piece has remained effectively motionless for a short consecutive
-    // period, explicitly zero its velocities and put it to sleep. This keeps
-    // the natural settling phase while removing the long tail of visible
-    // vibration in a finished stack.
+    // v22.3: collision response can create a large angular impulse even when
+    // the released piece itself had zero angular velocity. Keep that impulse
+    // bounded, especially during the first part of the landing phase.
+    // The visible rotation control is unaffected because rotate() explicitly
+    // zeroes angular velocity after each manual rotation.
     const bodies=world.bodies;
     for(const body of bodies){
       if(body.isStatic || body.label!=='piece') continue;
       body.plugin=body.plugin||{};
-      if(body.isSleeping){
+      if(!body.isSleeping){
+        body.plugin.releaseFrames=(body.plugin.releaseFrames||0)+1;
+        const early=body.plugin.releaseFrames<=45;
+        const maxAngular=early?0.060:0.090;
+        const av=body.angularVelocity||0;
+        // Mild angular damping prevents repeated solver impulses from
+        // accumulating into visible spinning without freezing rotation.
+        const damped=av*0.90;
+        const clamped=Math.max(-maxAngular,Math.min(maxAngular,damped));
+        if(Math.abs(clamped-av)>1e-7) Body.setAngularVelocity(body,clamped);
+      }else{
+        body.plugin.releaseFrames=0;
         body.plugin.settleFrames=0;
         continue;
       }
+
+      // Matter.js can wake sleeping stack members when a moving body collides
+      // with them. Re-sleep low-motion members quickly so tiny contact
+      // corrections do not propagate as prolonged stack vibration.
       const speed=body.speed||0;
       const angularSpeed=body.angularSpeed||0;
-      if(speed<0.022 && angularSpeed<0.0010){
+      if(speed<0.035 && angularSpeed<0.0025){
         body.plugin.settleFrames=(body.plugin.settleFrames||0)+1;
-        if(body.plugin.settleFrames>=6){
+        if(body.plugin.settleFrames>=4){
           Body.setVelocity(body,{x:0,y:0});
           Body.setAngularVelocity(body,0);
           Sleeping.set(body,true);
           body.plugin.settleFrames=0;
+          body.plugin.releaseFrames=0;
         }
       }else{
         body.plugin.settleFrames=0;
