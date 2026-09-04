@@ -1,4 +1,4 @@
-/* v22.1 - random piece selection with 37 pieces */
+/* v23.1 - v23.0 startup bugfix */
 const Game = (() => {
   let images=[];
   let pieces=[];
@@ -33,10 +33,10 @@ const Game = (() => {
   const measurementStatusEl=document.getElementById('measurementStatus');
   const measurementButton=document.getElementById('measurementButton');
   const measurementDownload=document.getElementById('measurementDownload');
-  if(measurementDebugEl) measurementDebugEl.classList.toggle('hidden',!DEBUG_MODE);
 
   const params=new URLSearchParams(location.search);
   const DEBUG_MODE=params.get("debug")==="on";
+  if(measurementDebugEl) measurementDebugEl.classList.toggle('hidden',!DEBUG_MODE);
   const shapeDebugEl=document.getElementById("shapeDebug");
   if(shapeDebugEl) shapeDebugEl.classList.toggle("hidden",!DEBUG_MODE);
   const debugPieceParam=params.get("piece");
