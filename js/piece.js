@@ -1,4 +1,4 @@
-/* v21.8 - support 36 piece assets */
+/* v21.8.1 - support 36 piece assets and .png/.PNG */
 const Piece = (() => {
   const MAX_PIECE = 82;
   const ALPHA_THRESHOLD = 32;
@@ -9,8 +9,16 @@ const Piece = (() => {
   function load(src){
     return new Promise((resolve,reject)=>{
       const im=new Image();
+      let triedUpper=false;
       im.onload=()=>resolve(im);
-      im.onerror=()=>reject(new Error(`画像を読み込めません: ${src}`));
+      im.onerror=()=>{
+        if(!triedUpper && src.toLowerCase().endsWith('.png')){
+          triedUpper=true;
+          im.src=src.slice(0,-4)+'.PNG';
+        }else{
+          reject(new Error(`画像を読み込めません: ${src}`));
+        }
+      };
       im.src=src;
     });
   }
