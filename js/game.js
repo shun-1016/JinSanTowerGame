@@ -1,4 +1,4 @@
-/* v23.2 - contact geometry measurement */
+/* v23.4 - selectable measurement groups */
 const Game = (() => {
   let images=[];
   let pieces=[];
@@ -26,12 +26,13 @@ const Game = (() => {
   const GAME_OVER_KEY='jinSanTowerGameBestScores';
   const MODE_NORMAL='normal';
   const MODE_ENDLESS='endless';
-  const MEASUREMENT_PIECE_COUNT=37;
+  const MEASUREMENT_GROUP_SIZE=8;
+  const MAX_PIECE_DISCOVERY=999;
   const MEASUREMENT_POST_LAND_FRAMES=60;
   let measurement=null;
   const measurementDebugEl=document.getElementById('measurementDebug');
   const measurementStatusEl=document.getElementById('measurementStatus');
-  const measurementButton=document.getElementById('measurementButton');
+  const measurementGroupsEl=document.getElementById('measurementGroups');
   const measurementDownload=document.getElementById('measurementDownload');
 
   const params=new URLSearchParams(location.search);
@@ -66,6 +67,59 @@ const Game = (() => {
   const normalModeButton=document.getElementById("normalModeButton");
   const endlessModeButton=document.getElementById("endlessModeButton");
   const endButton=document.getElementById("endButton");
+
+  function loadOptionalImage(number){
+    return new Promise(resolve=>{
+      const label=String(number).padStart(2,'0');
+      const primary=`assets/${label}.png`;
+      const alternate=`assets/${label}.PNG`;
+      const im=new Image();
+      im.onload=()=>resolve(im);
+      im.onerror=()=>{
+        const retry=new Image();
+        retry.onload=()=>resolve(retry);
+        retry.onerror=()=>resolve(null);
+        retry.src=alternate;
+      };
+      im.src=primary;
+    });
+  }
+
+  async function discoverAdditionalImages(){
+    for(let number=images.length+1;number<=MAX_PIECE_DISCOVERY;number++){
+      const im=await loadOptionalImage(number);
+      if(!im) break;
+      images.push(im);
+    }
+  }
+
+  function formatPieceRange(startIndex,endIndex){
+    return `${String(startIndex+1).padStart(2,'0')}〜${String(endIndex+1).padStart(2,'0')}`;
+  }
+
+  function setMeasurementButtonsDisabled(disabled){
+    if(!measurementGroupsEl) return;
+    measurementGroupsEl.querySelectorAll('button').forEach(btn=>{btn.disabled=disabled;});
+  }
+
+  function buildMeasurementGroups(){
+    if(!measurementGroupsEl) return;
+    measurementGroupsEl.innerHTML='';
+    for(let start=0;start<images.length;start+=MEASUREMENT_GROUP_SIZE){
+      const end=Math.min(images.length-1,start+MEASUREMENT_GROUP_SIZE-1);
+      const button=document.createElement('button');
+      button.type='button';
+      button.className='modeButton measurementButton';
+      button.dataset.start=String(start);
+      button.dataset.end=String(end);
+      const strong=document.createElement('strong');
+      strong.textContent=formatPieceRange(start,end);
+      const span=document.createElement('span');
+      span.textContent=`${end-start+1}ピースを落下〜着地＋着地後60フレーム計測`;
+      button.append(strong,span);
+      measurementGroupsEl.appendChild(button);
+    }
+  }
 
   function measurementSetStatus(text){
     if(measurementStatusEl) measurementStatusEl.textContent=text;
@@ -197,17 +251,19 @@ const Game = (() => {
     ].join(',');
   }
 
-  function measurementStart(){
+  function measurementStart(startIndex,endIndex){
     if(!DEBUG_MODE||!images.length||measurement) return;
+    startIndex=Math.max(0,Math.min(images.length-1,startIndex));
+    endIndex=Math.max(startIndex,Math.min(images.length-1,endIndex));
     gameOver=true;ready=false;current=null;pieces=[];score=0;spawnAt=0;cameraY=0;towerHeight=0;gameMode=null;
     if(modeModal) modeModal.classList.add('hidden');
     if(endButton) endButton.disabled=true;
-    if(measurementButton) measurementButton.disabled=true;
+    setMeasurementButtonsDisabled(true);
     if(measurementDownload) measurementDownload.classList.add('hidden');
-    measurement={index:0,frame:0,startedAt:0,landingFrame:null,postLandFrames:0,rows:[],current:null,phase:'falling',allRows:[]};
+    measurement={startIndex,endIndex,index:startIndex,frame:0,startedAt:0,landingFrame:null,postLandFrames:0,rows:[],current:null,phase:'falling',allRows:[]};
     showStatus('自動計測中…');
-    measurementSetStatus('01 / 37 を計測中…');
-    measurementCreatePiece(0);
+    measurementSetStatus(`${formatPieceRange(startIndex,endIndex)} を計測中…`);
+    measurementCreatePiece(startIndex);
   }
 
   function measurementFinish(){
@@ -217,14 +273,15 @@ const Game = (() => {
     const url=URL.createObjectURL(blob);
     const d=new Date();
     const stamp=[d.getFullYear(),String(d.getMonth()+1).padStart(2,'0'),String(d.getDate()).padStart(2,'0'),String(d.getHours()).padStart(2,'0'),String(d.getMinutes()).padStart(2,'0'),String(d.getSeconds()).padStart(2,'0')].join('');
-    const filename=`JinSanTowerGame_v23.3_physics_log_${stamp}.csv`;
+    const range=`${String(measurement.startIndex+1).padStart(2,'0')}-${String(measurement.endIndex+1).padStart(2,'0')}`;
+    const filename=`JinSanTowerGame_v23.4_physics_log_${range}_${stamp}.csv`;
     if(measurementDownload){
       measurementDownload.href=url;measurementDownload.download=filename;measurementDownload.textContent='CSVを保存';measurementDownload.classList.remove('hidden');
     }
     try{const a=document.createElement('a');a.href=url;a.download=filename;a.click();}catch(e){}
-    measurementSetStatus(`計測完了：37 / 37 ピース　${measurement.allRows.length} 行`);
+    measurementSetStatus(`計測完了：${formatPieceRange(measurement.startIndex,measurement.endIndex)}　${measurement.allRows.length} 行`);
     showStatus('自動計測完了。CSVを保存できます。');
-    if(measurementButton){measurementButton.disabled=false;measurementButton.innerHTML='<strong>再計測</strong><span>同じ条件で全37ピースを再計測</span>';}
+    setMeasurementButtonsDisabled(false);
     measurement=null;
     gameOver=false;
     ready=false;
@@ -247,18 +304,18 @@ const Game = (() => {
       measurement.postLandFrames=measurement.frame-measurement.landingFrame;
       if(measurement.postLandFrames>=MEASUREMENT_POST_LAND_FRAMES){
         const next=measurement.index+1;
-        if(next>=MEASUREMENT_PIECE_COUNT){measurementFinish();return;}
+        if(next>measurement.endIndex){measurementFinish();return;}
         measurement.index=next;
-        measurementSetStatus(`${String(next+1).padStart(2,'0')} / ${MEASUREMENT_PIECE_COUNT} を計測中…`);
+        measurementSetStatus(`${String(next+1).padStart(2,'0')} / ${String(measurement.endIndex+1).padStart(2,'0')} を計測中…`);
         measurementCreatePiece(next);
       }
     }
     if(measurement.frame>600){
       // Safety timeout: avoid blocking the whole debug run on an abnormal body.
       const next=measurement.index+1;
-      if(next>=MEASUREMENT_PIECE_COUNT){measurementFinish();return;}
+      if(next>measurement.endIndex){measurementFinish();return;}
       measurement.index=next;
-      measurementSetStatus(`${String(next+1).padStart(2,'0')} / ${MEASUREMENT_PIECE_COUNT} を計測中…（タイムアウト）`);
+      measurementSetStatus(`${String(next+1).padStart(2,'0')} / ${String(measurement.endIndex+1).padStart(2,'0')} を計測中…（タイムアウト）`);
       measurementCreatePiece(next);
     }
   }
@@ -606,6 +663,8 @@ const Game = (() => {
       // DOM更新を一度描画させてから画像読み込みを開始する。
       await new Promise(resolve=>requestAnimationFrame(resolve));
       images=await Piece.preload();
+      await discoverAdditionalImages();
+      buildMeasurementGroups();
 
       hideStatus();
       if(normalModeButton) normalModeButton.disabled=false;
@@ -614,7 +673,7 @@ const Game = (() => {
       console.error(e);
       if(normalModeButton) normalModeButton.disabled=true;
       if(endlessModeButton) endlessModeButton.disabled=true;
-      if(measurementButton) measurementButton.disabled=true;
+      setMeasurementButtonsDisabled(true);
       showStatus("画像読み込みエラー: "+e.message);
     }
   }
@@ -624,7 +683,11 @@ const Game = (() => {
   if(normalModeButton) normalModeButton.addEventListener('click',()=>startGame(MODE_NORMAL));
   if(endlessModeButton) endlessModeButton.addEventListener('click',()=>startGame(MODE_ENDLESS));
   if(endButton) endButton.addEventListener('click',endGame);
-  if(measurementButton) measurementButton.addEventListener('click',measurementStart);
+  if(measurementGroupsEl) measurementGroupsEl.addEventListener('click',e=>{
+    const button=e.target.closest('button[data-start][data-end]');
+    if(!button) return;
+    measurementStart(Number(button.dataset.start),Number(button.dataset.end));
+  });
   document.addEventListener('pointerdown',unlockAudio,{passive:true});
   document.addEventListener('touchstart',unlockAudio,{passive:true});
 
