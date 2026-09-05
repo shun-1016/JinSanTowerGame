@@ -16,14 +16,13 @@
 .measurementButton{margin:0;min-height:56px;padding:9px 12px}
 .measurementButton strong{font-size:14px}
 .measurementButton span{font-size:10px}
-.measurementGroups{display:grid;gap:8px;max-height:184px;overflow-y:auto;overscroll-behavior:contain;-webkit-overflow-scrolling:touch;padding-right:3px}
 .measurementDownload{display:block;margin-top:8px;text-align:center;font-weight:700;text-decoration:none;padding:10px;border-radius:10px;background:#fff;color:inherit;border:1px solid rgba(0,0,0,.18)}
 </style>
 </head>
 <body>
   <header class="header">
     <h1>JinSan Tower Game</h1>
-    <div class="headerRight"><span id="version">v23.4.1</span><button id="endButton" class="endButton" type="button">終了</button></div>
+    <div class="headerRight"><span id="version">v23.5</span><button id="endButton" class="endButton" type="button">終了</button></div>
   </header>
   <main>
     <div class="stage">
@@ -55,9 +54,12 @@
           </button>
           <div id="measurementDebug" class="measurementDebug hidden">
             <div class="measurementTitle">物理挙動デバッグ</div>
-            <div id="measurementStatus" class="measurementStatus">画像フォルダ内のピース数から8個ずつ自動分割します</div>
-            <div id="measurementGroups" class="measurementGroups"></div>
-            <a id="measurementDownload" class="measurementDownload hidden" download>CSVを保存</a>
+            <div id="measurementStatus" class="measurementStatus">全ピースを順番に落下〜着地＋着地後60フレーム計測し、ピースごとのCSVをZIPで保存します</div>
+            <button id="measurementButton" class="modeButton measurementButton" type="button">
+              <strong>全ピース自動計測</strong>
+              <span>全ピースを計測 → ピース別CSVをZIP出力</span>
+            </button>
+            <a id="measurementDownload" class="measurementDownload hidden" download>計測ZIPを保存</a>
           </div>
         </div>
       </div>
