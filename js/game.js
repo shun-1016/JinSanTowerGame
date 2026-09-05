@@ -1,4 +1,4 @@
-/* v23.1 - v23.0 startup bugfix */
+/* v23.2 - contact geometry measurement */
 const Game = (() => {
   let images=[];
   let pieces=[];
@@ -36,7 +36,10 @@ const Game = (() => {
 
   const params=new URLSearchParams(location.search);
   const DEBUG_MODE=params.get("debug")==="on";
-  if(measurementDebugEl) measurementDebugEl.classList.toggle('hidden',!DEBUG_MODE);
+  if(measurementDebugEl){
+    measurementDebugEl.classList.toggle('hidden',!DEBUG_MODE);
+    measurementDebugEl.style.display=DEBUG_MODE?'':'none';
+  }
   const shapeDebugEl=document.getElementById("shapeDebug");
   if(shapeDebugEl) shapeDebugEl.classList.toggle("hidden",!DEBUG_MODE);
   const debugPieceParam=params.get("piece");
@@ -104,8 +107,67 @@ const Game = (() => {
     measurement.rows=[];
   }
 
+  function measurementContactGeometry(body){
+    const result={
+      contactPoints:0,
+      contactWidth:0,
+      contactCenterOffset:0,
+      contactParts:0,
+      bottomWidth1:0,
+      bottomWidth2:0,
+      bottomWidth4:0,
+      bottomWidth8:0
+    };
+    const parts=(body.parts||[]).slice(1);
+    const groundY=stageH-12;
+
+    // Geometry-only bottom widths: horizontal span of physical vertices
+    // within 1/2/4/8px of the lowest vertex height.
+    if(parts.length){
+      const verts=parts.flatMap(part=>part.vertices||[]);
+      if(verts.length){
+        const maxY=Math.max(...verts.map(v=>v.y));
+        for(const [key,band] of [['bottomWidth1',1],['bottomWidth2',2],['bottomWidth4',4],['bottomWidth8',8]]){
+          const near=verts.filter(v=>v.y>=maxY-band);
+          if(near.length) result[key]=Math.max(...near.map(v=>v.x))-Math.min(...near.map(v=>v.x));
+        }
+      }
+    }
+
+    const xs=[];
+    const partIds=new Set();
+    for(const pair of Physics.engine.pairs.list){
+      if(!pair.isActive) continue;
+      const a=pair.bodyA, b=pair.bodyB;
+      const aParent=a&&a.parent?a.parent:a;
+      const bParent=b&&b.parent?b.parent:b;
+      const isGroundA=a&&a.label==='ground';
+      const isGroundB=b&&b.label==='ground';
+      if(!((aParent===body&&isGroundB)||(bParent===body&&isGroundA))) continue;
+
+      const movingPart=aParent===body?a:b;
+      if(movingPart&&movingPart.id!==undefined) partIds.add(movingPart.id);
+      const supports=(pair.collision&&pair.collision.supports)||[];
+      for(const support of supports){
+        if(!support||!support.vertex) continue;
+        const y=support.vertex.y;
+        if(Math.abs(y-groundY)<8) xs.push(support.vertex.x);
+      }
+    }
+    result.contactPoints=xs.length;
+    result.contactParts=partIds.size;
+    if(xs.length){
+      const minX=Math.min(...xs), maxX=Math.max(...xs);
+      result.contactWidth=maxX-minX;
+      const center=(minX+maxX)/2;
+      result.contactCenterOffset=center-body.position.x;
+    }
+    return result;
+  }
+
   function measurementRow(p,contact){
     const b=p.body,pl=b.plugin||{};
+    const cg=measurementContactGeometry(b);
     const t=Math.max(0,performance.now()-measurement.startedAt);
     const phase=measurement.landingFrame===null?'falling':'post_landing';
     return [
@@ -118,6 +180,8 @@ const Game = (() => {
       Number(pl.debugInertia||b.inertia||0).toFixed(3),
       Number(pl.debugComOffset||0).toFixed(3),
       Number(pl.debugFootprintWidth||0).toFixed(3),
+      cg.bottomWidth1.toFixed(3),cg.bottomWidth2.toFixed(3),cg.bottomWidth4.toFixed(3),cg.bottomWidth8.toFixed(3),
+      cg.contactWidth.toFixed(3),cg.contactCenterOffset.toFixed(3),cg.contactPoints,cg.contactParts,
       Number(pl.debugAspectRatio||0).toFixed(4),
       Number(pl.debugPartCount||0),
       Number(pl.debugTriangulatedCount||0),
@@ -141,13 +205,13 @@ const Game = (() => {
   }
 
   function measurementFinish(){
-    const header='piece,phase,frame,time_ms,landing_frame,x,y,velocity_x,velocity_y,speed,angular_velocity,angle,sleeping,ground_contact,mass,inertia,com_offset_px,footprint_width_px,aspect_ratio,physics_parts,triangles,regions,raw_regions,contour_vertices';
+    const header='piece,phase,frame,time_ms,landing_frame,x,y,velocity_x,velocity_y,speed,angular_velocity,angle,sleeping,ground_contact,mass,inertia,com_offset_px,footprint_width_px,bottom_width_1px,bottom_width_2px,bottom_width_4px,bottom_width_8px,contact_width_px,contact_center_offset_px,contact_points,contact_parts,aspect_ratio,physics_parts,triangles,regions,raw_regions,contour_vertices';
     const csv='\ufeff'+header+'\n'+measurement.allRows.join('\n')+'\n';
     const blob=new Blob([csv],{type:'text/csv;charset=utf-8'});
     const url=URL.createObjectURL(blob);
     const d=new Date();
     const stamp=[d.getFullYear(),String(d.getMonth()+1).padStart(2,'0'),String(d.getDate()).padStart(2,'0'),String(d.getHours()).padStart(2,'0'),String(d.getMinutes()).padStart(2,'0'),String(d.getSeconds()).padStart(2,'0')].join('');
-    const filename=`JinSanTowerGame_v23.0_physics_log_${stamp}.csv`;
+    const filename=`JinSanTowerGame_v23.2_physics_log_${stamp}.csv`;
     if(measurementDownload){
       measurementDownload.href=url;measurementDownload.download=filename;measurementDownload.textContent='CSVを保存';measurementDownload.classList.remove('hidden');
     }
