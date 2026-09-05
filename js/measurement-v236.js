@@ -1,8 +1,8 @@
-/* v23.6 - measurement logger / dynamic piece discovery */
+/* v23.6.1 - measurement logger / dynamic piece discovery */
 (() => {
   'use strict';
 
-  const VERSION = 'v23.6';
+  const VERSION = 'v23.6.1';
   const ASSET_PREFIX = 'assets/';
   const MAX_PIECE_DISCOVERY = 999;
   const BASE_WIDTH_RATIO = 0.82;
@@ -26,7 +26,6 @@
     stageH: 500,
     baseWidth: 0,
     raf: 0,
-    originalPhysicsStep: null
   };
 
   const csvHeader = [
@@ -468,18 +467,18 @@
     ui.button.disabled = false;
     ui.runInput.disabled = false;
     state.running = false;
-    if(state.originalPhysicsStep){
-      Physics.step = state.originalPhysicsStep;
-      state.originalPhysicsStep = null;
-    }
+    updateMeasurementOverlay();
+    const modeModal = document.getElementById('modeModal');
+    if(modeModal) modeModal.classList.remove('hidden');
     URL.revokeObjectURL(url);
   }
 
   function step() {
     if(!state.running) return;
 
-    Physics.step(1/60);
-
+    // Physics is advanced by the existing Game.update() loop.
+    // This module only observes the current body, records metrics,
+    // and renders the measurement scene after the game's render pass.
     const piece = state.current;
     if(!piece){
       state.raf = requestAnimationFrame(step);
@@ -522,13 +521,13 @@
       startPiece(next);
     }
 
+    updateMeasurementOverlay();
+    renderMeasurementFrame();
     if(state.running) state.raf = requestAnimationFrame(step);
   }
 
   function startRun() {
     if(state.running) return;
-    state.originalPhysicsStep = Physics.step;
-    Physics.step = () => {};
     const runNumber = Math.max(1, Math.floor(Number(ui.runInput.value) || DEFAULT_RUN_NUMBER));
     state.runNumber = runNumber;
     state.completedRaw = {};
@@ -536,6 +535,8 @@
     state.current = null;
     state.pieceIndex = 0;
     state.running = true;
+    const modeModal = document.getElementById('modeModal');
+    if(modeModal) modeModal.classList.add('hidden');
     ui.button.disabled = true;
     ui.runInput.disabled = true;
     ui.status.textContent = `計測中… 1/${state.images.length}`;
@@ -552,6 +553,57 @@
     status: null,
     downloadHost: null
   };
+
+  function ensureMeasurementOverlay() {
+    if(state.overlay) return state.overlay;
+    const stage = document.querySelector('.stage');
+    if(!stage) return null;
+    const el = document.createElement('div');
+    el.style.position = 'absolute';
+    el.style.left = '50%';
+    el.style.top = '10px';
+    el.style.transform = 'translateX(-50%)';
+    el.style.zIndex = '20';
+    el.style.padding = '8px 12px';
+    el.style.borderRadius = '10px';
+    el.style.background = 'rgba(255,255,255,.88)';
+    el.style.border = '1px solid rgba(0,0,0,.16)';
+    el.style.fontSize = '12px';
+    el.style.fontWeight = '700';
+    el.style.pointerEvents = 'none';
+    el.style.display = 'none';
+    stage.appendChild(el);
+    state.overlay = el;
+    return el;
+  }
+
+  function updateMeasurementOverlay() {
+    const el = ensureMeasurementOverlay();
+    if(!el) return;
+    if(!state.running || !state.current) {
+      el.style.display = 'none';
+      return;
+    }
+    el.style.display = 'block';
+    const pieceNo = state.pieceIndex + 1;
+    const total = state.images.length;
+    const phase = state.landingFrame === null
+      ? `落下中 frame ${state.frame}`
+      : `着地後 ${state.postLandFrames}/${POST_LAND_FRAMES}`;
+    el.textContent = `v23.6.1 計測　${pieceNo}/${total}　${phase}`;
+  }
+
+  function renderMeasurementFrame() {
+    if(!state.running || !state.current) return;
+    try {
+      Renderer.clear();
+      Renderer.drawPiece(state.current, 0);
+      Renderer.drawGround(state.stageH - 12, 0, state.baseWidth);
+      Renderer.renderEffects(0);
+    } catch(error) {
+      console.warn(`${VERSION}: render error`, error);
+    }
+  }
 
   function buildUI() {
     if(new URLSearchParams(location.search).get('debug') !== 'on') return false;
@@ -624,6 +676,7 @@
     try{
       state.images = await discoverImages();
       if(!state.images.length) throw new Error('assets/01.png または assets/01.PNG が見つかりません。');
+    ensureMeasurementOverlay();
       state.completedRaw = {};
       ui.status.textContent = `${state.images.length}ピース検出。Run番号を確認して計測を開始してください。`;
       ui.button.disabled = false;
