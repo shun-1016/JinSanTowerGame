@@ -22,7 +22,7 @@
 <body>
   <header class="header">
     <h1>JinSan Tower Game</h1>
-    <div class="headerRight"><span id="version">v23.5</span><button id="endButton" class="endButton" type="button">終了</button></div>
+    <div class="headerRight"><span id="version">v23.6</span><button id="endButton" class="endButton" type="button">終了</button></div>
   </header>
   <main>
     <div class="stage">
@@ -54,10 +54,10 @@
           </button>
           <div id="measurementDebug" class="measurementDebug hidden">
             <div class="measurementTitle">物理挙動デバッグ</div>
-            <div id="measurementStatus" class="measurementStatus">全ピースを順番に落下〜着地＋着地後60フレーム計測し、ピースごとのCSVをZIPで保存します</div>
+            <div id="measurementStatus" class="measurementStatus">v23.5の旧計測UI（v23.6計測UIに置き換え）</div>
             <button id="measurementButton" class="modeButton measurementButton" type="button">
               <strong>全ピース自動計測</strong>
-              <span>全ピースを計測 → ピース別CSVをZIP出力</span>
+              <span>v23.5旧計測</span>
             </button>
             <a id="measurementDownload" class="measurementDownload hidden" download>計測ZIPを保存</a>
           </div>
@@ -89,5 +89,6 @@
   <script src="js/input.js"></script>
   <script src="js/game.js"></script>
   <script src="js/main.js"></script>
+  <script src="js/measurement-v236.js"></script>
 </body>
 </html>
