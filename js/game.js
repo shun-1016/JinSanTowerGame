@@ -147,11 +147,17 @@ const Game = (() => {
 
       const movingPart=aParent===body?a:b;
       if(movingPart&&movingPart.id!==undefined) partIds.add(movingPart.id);
-      const supports=(pair.collision&&pair.collision.supports)||[];
-      for(const support of supports){
-        if(!support||!support.vertex) continue;
-        const y=support.vertex.y;
-        if(Math.abs(y-groundY)<8) xs.push(support.vertex.x);
+      // Matter.js 0.20.0 stores the active contact points on pair.contacts.
+      // collision.supports contains support vectors, but Pair.update() copies
+      // the active supports into pair.contacts and exposes contactCount as the
+      // authoritative active-contact count.
+      const contacts=pair.contacts||[];
+      const count=Math.min(pair.contactCount||0,contacts.length);
+      for(let i=0;i<count;i++){
+        const contact=contacts[i];
+        const vertex=contact&&contact.vertex;
+        if(!vertex) continue;
+        if(Math.abs(vertex.y-groundY)<8) xs.push(vertex.x);
       }
     }
     result.contactPoints=xs.length;
@@ -211,7 +217,7 @@ const Game = (() => {
     const url=URL.createObjectURL(blob);
     const d=new Date();
     const stamp=[d.getFullYear(),String(d.getMonth()+1).padStart(2,'0'),String(d.getDate()).padStart(2,'0'),String(d.getHours()).padStart(2,'0'),String(d.getMinutes()).padStart(2,'0'),String(d.getSeconds()).padStart(2,'0')].join('');
-    const filename=`JinSanTowerGame_v23.2_physics_log_${stamp}.csv`;
+    const filename=`JinSanTowerGame_v23.3_physics_log_${stamp}.csv`;
     if(measurementDownload){
       measurementDownload.href=url;measurementDownload.download=filename;measurementDownload.textContent='CSVを保存';measurementDownload.classList.remove('hidden');
     }
