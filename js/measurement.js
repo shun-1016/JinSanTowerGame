@@ -1,14 +1,13 @@
-/* v1.24.0 - all-piece collision diagnostics and visible measurement playback */
+/* v1.24.1 - single physics-step measurement integration */
 (() => {
   'use strict';
 
-  const VERSION = 'v1.24.0';
+  const VERSION = 'v1.24.1';
   const ASSET_PREFIX = 'assets/';
   const MAX_DISCOVERY = 999;
   const POST_LAND_FRAMES = 60;
   const MAX_FALL_FRAMES = 600;
   const BASE_WIDTH_RATIO = 0.82;
-  const DT = 1000 / 60;
 
   const $ = id => document.getElementById(id);
   const pad2 = n => String(n).padStart(2, '0');
@@ -36,7 +35,7 @@
 
   const state = {
     images: [], run: 1, index: 0, frame: 0, startedAt: 0, landingFrame: null, rows: [], allRows: [], summaries: [],
-    stageW: 390, stageH: 500, baseWidth: 0, piece: null, body: null, running: false, raf: 0
+    stageW: 390, stageH: 500, baseWidth: 0, piece: null, body: null, running: false
   };
 
   async function loadImage(n){
@@ -160,33 +159,58 @@
     state.index=index; state.frame=0; state.startedAt=performance.now(); state.landingFrame=null; state.rows=[]; state.piece=p; state.body=p.body;
   }
 
-  function renderMeasurementFrame(){
-    if(!state.piece || !state.body) return;
-    Renderer.clear();
-    Renderer.drawGround(state.stageH-12,0,state.baseWidth);
-    Renderer.drawPiece(state.piece,0);
-  }
-
-  function tick(){
-    if(!state.running) return;
-    Physics.step(DT);
-    renderMeasurementFrame();
+  function observeFrame(){
+    if(!state.running || !state.body) return;
     const body=state.body;
     const contact=groundContact(body);
     if(state.landingFrame===null && contact){ state.landingFrame=state.frame; }
     const phase=state.landingFrame===null?'falling':'post_landing';
     state.rows.push(rowFor(body,phase));
+
     if(state.landingFrame!==null && state.frame-state.landingFrame>=POST_LAND_FRAMES){
       finishPiece('complete');
       if(state.index+1<state.images.length){
-        setStatus(`${VERSION} 計測中: ${state.index+2}/${state.images.length}`); startPiece(state.index+1);
-      }else{ finishRun(); return; }
+        setStatus(`${VERSION} 計測中: ${state.index+2}/${state.images.length}`);
+        startPiece(state.index+1);
+      }else{
+        finishRun();
+        return;
+      }
     }else if(state.frame>=MAX_FALL_FRAMES){
       finishPiece('timeout');
-      if(state.index+1<state.images.length){ startPiece(state.index+1); }
-      else { finishRun(); return; }
-    }else{ state.frame++; }
-    state.raf=requestAnimationFrame(tick);
+      if(state.index+1<state.images.length){
+        setStatus(`${VERSION} 計測中: ${state.index+2}/${state.images.length}`);
+        startPiece(state.index+1);
+      }else{
+        finishRun();
+        return;
+      }
+    }else{
+      state.frame++;
+    }
+  }
+
+  function installGameLoopHooks(){
+    if(typeof Game==='undefined' || !Game || typeof Game.update!=='function' || Game.__measurementV1241Installed) return;
+    const originalUpdate=Game.update;
+    const originalRender=typeof Game.render==='function' ? Game.render : null;
+
+    Game.update=function(dt){
+      originalUpdate(dt);
+      // Game.update performs the only Physics.step() for this frame.
+      // Measurement only observes the resulting state; it never advances physics itself.
+      observeFrame();
+    };
+
+    if(originalRender){
+      Game.render=function(){
+        originalRender();
+        if(state.running && state.piece && state.body){
+          Renderer.drawPiece(state.piece,0);
+        }
+      };
+    }
+    Game.__measurementV1241Installed=true;
   }
 
   function csvLine(values){ return values.map(v=>{ const s=String(v??''); return /[,"\r\n]/.test(s)?`"${s.replace(/"/g,'""')}"`:s; }).join(','); }
@@ -223,7 +247,7 @@
   }
 
   function finishRun(){
-    state.running=false; state.piece=null; state.body=null; cancelAnimationFrame(state.raf); clearDynamicBodies();
+    state.running=false; state.piece=null; state.body=null; clearDynamicBodies();
     const meta=metadataRows();
     const files=[
       {name:'metadata.csv',content:makeCsv(meta.h,meta.rows)},
@@ -237,6 +261,9 @@
     const b=$('measurementButton'); if(b){b.disabled=false;b.textContent='全ピース自動計測';}
     setStatus(`${VERSION} 計測完了（${state.images.length}ピース / run ${state.run}）`);
     const s=$('measurementStatus'); if(s) s.textContent=`完了。run ${state.run} のZIPを保存してください。次回はrun番号を変更して再計測。`;
+    const modal=$('modeModal'); if(modal) modal.classList.remove('hidden');
+    const normal=$('normalModeButton'); if(normal) normal.disabled=false;
+    const endless=$('endlessModeButton'); if(endless) endless.disabled=false;
   }
 
   function start(){
@@ -248,7 +275,8 @@
     const modal=$('modeModal'); if(modal) modal.classList.add('hidden');
     const a=$('measurementDownload'); if(a) a.classList.add('hidden');
     const b=$('measurementButton'); if(b)b.disabled=true;
-    setStatus(`${VERSION} 計測開始…`); startPiece(0); state.raf=requestAnimationFrame(tick);
+    setStatus(`${VERSION} 計測開始…`);
+    startPiece(0);
   }
 
   async function init(){
@@ -257,6 +285,7 @@
     // Remove listeners installed by older measurement scripts by replacing the node.
     const clean=button.cloneNode(true); button.replaceWith(clean);
     clean.addEventListener('click',start);
+    installGameLoopHooks();
     state.images=await discoverImages();
     const title=document.querySelector('.measurementTitle'); if(title) title.textContent=`物理挙動デバッグ ${VERSION}`;
     const status=$('measurementStatus'); if(status) status.textContent=`${state.images.length}ピース検出。着地衝突診断を計測できます。`;
