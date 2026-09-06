@@ -1,8 +1,8 @@
-/* v1.24.1 - single physics-step measurement integration */
+/* v1.24.2 - single physics-step measurement integration */
 (() => {
   'use strict';
 
-  const VERSION = 'v1.24.1';
+  const VERSION = 'v1.24.2';
   const ASSET_PREFIX = 'assets/';
   const MAX_DISCOVERY = 999;
   const POST_LAND_FRAMES = 60;
@@ -255,9 +255,32 @@
       {name:'validation.csv',content:makeCsv(validationHeader,validationRows())}
     ];
     const by=new Map(); for(const r of state.allRows){ const p=Number(r.split(',')[0]); if(!by.has(p))by.set(p,[]);by.get(p).push(r); }
-    for(let i=1;i<=state.images.length;i++) files.push({name:`${pad2(i)}.csv`,content:'\ufeff'+csvHeader.join(',')+'\n'+(by.get(i)||[]).map(r=>r.split(',').map(v=>`"${String(v).replace(/"/g,'""')}"`).join(',')).join('\n')+'\n'});
+    const runFolder=`run${state.run}`;
+    for(let i=1;i<=state.images.length;i++) files.push({name:`${runFolder}/${pad2(i)}.csv`,content:'\ufeff'+csvHeader.join(',')+'\n'+(by.get(i)||[]).map(r=>r.split(',').map(v=>`"${String(v).replace(/"/g,'""')}"`).join(',')).join('\n')+'\n'});
+    files[0].name=`${runFolder}/metadata.csv`;
+    files[1].name=`${runFolder}/summary.csv`;
+    files[2].name=`${runFolder}/validation.csv`;
     const blob=zip(files),url=URL.createObjectURL(blob),a=$('measurementDownload');
-    if(a){ a.href=url;a.download=`JinSanTowerGame_${VERSION}_run${state.run}_collision_diagnostics.zip`;a.textContent=`${VERSION} 計測ZIPを保存`;a.classList.remove('hidden'); }
+    if(a){
+      a.href=url;
+      a.download=`JinSanTowerGame_${VERSION}_run${state.run}_collision_diagnostics.zip`;
+      a.textContent=`${VERSION} 計測ZIPを保存`;
+      a.classList.remove('hidden');
+      a.style.display='block';
+
+      // Try the same automatic download behavior used by the previous measurement version.
+      // If the browser blocks programmatic downloads (e.g. iOS browser restrictions),
+      // the visible link remains available as a fallback.
+      try{
+        const auto=document.createElement('a');
+        auto.href=url;
+        auto.download=a.download;
+        auto.style.display='none';
+        document.body.appendChild(auto);
+        auto.click();
+        auto.remove();
+      }catch(e){}
+    }
     const b=$('measurementButton'); if(b){b.disabled=false;b.textContent='全ピース自動計測';}
     setStatus(`${VERSION} 計測完了（${state.images.length}ピース / run ${state.run}）`);
     const s=$('measurementStatus'); if(s) s.textContent=`完了。run ${state.run} のZIPを保存してください。次回はrun番号を変更して再計測。`;
