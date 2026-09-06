@@ -1,0 +1,267 @@
+/* v1.24.0 - all-piece collision diagnostics and visible measurement playback */
+(() => {
+  'use strict';
+
+  const VERSION = 'v1.24.0';
+  const ASSET_PREFIX = 'assets/';
+  const MAX_DISCOVERY = 999;
+  const POST_LAND_FRAMES = 60;
+  const MAX_FALL_FRAMES = 600;
+  const BASE_WIDTH_RATIO = 0.82;
+  const DT = 1000 / 60;
+
+  const $ = id => document.getElementById(id);
+  const pad2 = n => String(n).padStart(2, '0');
+  const num = (v, d=3) => Number.isFinite(Number(v)) ? Number(v).toFixed(d) : '';
+
+  const csvHeader = [
+    'piece','phase','frame','time_ms','landing_frame','x','y','velocity_x','velocity_y','speed','angular_velocity','angle','sleeping','ground_contact',
+    'mass','inertia','com_offset_px','footprint_width_px','bottom_width_1px','bottom_width_2px','bottom_width_4px','bottom_width_8px',
+    'contact_width_px','contact_center_offset_px','contact_points','contact_parts','aspect_ratio','physics_parts','triangles','regions','raw_regions','contour_vertices',
+    'pre_velocity_x','pre_velocity_y','pre_angular_velocity','delta_velocity_x','delta_velocity_y','delta_angular_velocity',
+    'collision_normal_x','collision_normal_y','collision_depth','collision_separation','collision_pair_count','collision_contact_count','collision_support_count','collision_contact_part_count',
+    'collision_contact_min_x','collision_contact_max_x','collision_contact_mean_x','collision_contact_center_offset_px'
+  ];
+
+  const summaryHeader = [
+    'run','piece','status','frame_count','landing_frame','post_land_frame_count',
+    'mass','inertia','com_offset_px','footprint_width_px','contact_width_px','contact_center_offset_px','contact_points','contact_parts',
+    'landing_vx','landing_vy','landing_angular_velocity','landing_delta_vx','landing_delta_vy','landing_delta_angular_velocity',
+    'max_post_land_abs_vx','max_post_land_abs_vy','max_post_land_abs_angular_velocity','post_land_x_range','post_land_y_range','post_land_angle_range',
+    'max_bounce_height_px','sleep_frame','final_sleeping','final_ground_contact',
+    'physics_parts','triangles','regions','raw_regions','contour_vertices'
+  ];
+
+  const validationHeader = ['run','piece','status','raw_row_count','landing_frame','expected_row_count','row_count_ok','landing_present','post_land_60_ok'];
+
+  const state = {
+    images: [], run: 1, index: 0, frame: 0, startedAt: 0, landingFrame: null, rows: [], allRows: [], summaries: [],
+    stageW: 390, stageH: 500, baseWidth: 0, piece: null, body: null, running: false, raf: 0
+  };
+
+  async function loadImage(n){
+    const label=pad2(n);
+    const load=ext=>new Promise(resolve=>{ const im=new Image(); im.onload=()=>resolve(im); im.onerror=()=>resolve(null); im.src=`${ASSET_PREFIX}${label}.${ext}`; });
+    return (await load('png')) || (await load('PNG'));
+  }
+
+  async function discoverImages(){
+    const out=[];
+    for(let n=1;n<=MAX_DISCOVERY;n++){ const im=await loadImage(n); if(!im) break; out.push(im); }
+    return out;
+  }
+
+  function setStatus(text){
+    const el=$('measurementStatus'); if(el) el.textContent=text;
+    const status=$('status'); if(status) status.textContent=text;
+  }
+
+  function clearDynamicBodies(){
+    if(!Physics.world) return;
+    const dynamic=Physics.world.bodies.filter(b=>!b.isStatic);
+    if(dynamic.length) Matter.World.remove(Physics.world,dynamic);
+  }
+
+  function setupPhysics(){
+    const size=Renderer.resize();
+    state.stageW=size.width; state.stageH=size.height; state.baseWidth=state.stageW*BASE_WIDTH_RATIO;
+    clearDynamicBodies();
+    Physics.setup(state.stageW,state.stageH-12,state.baseWidth,false);
+  }
+
+  function groundContact(body){
+    const pairs=Physics.engine.pairs.list || [];
+    for(const pair of pairs){
+      if(!pair.isActive) continue;
+      const a=pair.bodyA&&pair.bodyA.parent?pair.bodyA.parent:pair.bodyA;
+      const b=pair.bodyB&&pair.bodyB.parent?pair.bodyB.parent:pair.bodyB;
+      if((a===body&&b&&b.label==='ground')||(b===body&&a&&a.label==='ground')) return true;
+    }
+    return false;
+  }
+
+  function contactGeometry(body){
+    const r={bottomWidth1:0,bottomWidth2:0,bottomWidth4:0,bottomWidth8:0,contactWidth:0,contactCenterOffset:0,contactPoints:0,contactParts:0};
+    const parts=(body.parts||[]).slice(1);
+    if(parts.length){
+      const verts=parts.flatMap(p=>p.vertices||[]);
+      if(verts.length){
+        const maxY=Math.max(...verts.map(v=>v.y));
+        for(const [key,band] of [['bottomWidth1',1],['bottomWidth2',2],['bottomWidth4',4],['bottomWidth8',8]]){
+          const near=verts.filter(v=>v.y>=maxY-band);
+          if(near.length) r[key]=Math.max(...near.map(v=>v.x))-Math.min(...near.map(v=>v.x));
+        }
+      }
+    }
+    const xs=[]; const ids=new Set(); const groundY=state.stageH-12;
+    for(const pair of Physics.engine.pairs.list||[]){
+      if(!pair.isActive) continue;
+      const a=pair.bodyA,b=pair.bodyB;
+      const ap=a&&a.parent?a.parent:a,bp=b&&b.parent?b.parent:b;
+      const ga=a&&a.label==='ground',gb=b&&b.label==='ground';
+      if(!((ap===body&&gb)||(bp===body&&ga))) continue;
+      const moving=ap===body?a:b; if(moving&&moving.id!==undefined) ids.add(moving.id);
+      const contacts=pair.contacts||[]; const count=Math.min(pair.contactCount||0,contacts.length);
+      for(let i=0;i<count;i++){ const v=contacts[i]&&contacts[i].vertex; if(v&&Math.abs(v.y-groundY)<8) xs.push(v.x); }
+    }
+    r.contactPoints=xs.length; r.contactParts=ids.size;
+    if(xs.length){ const min=Math.min(...xs),max=Math.max(...xs); r.contactWidth=max-min; r.contactCenterOffset=(min+max)/2-body.position.x; }
+    return r;
+  }
+
+  function rowFor(body, phase){
+    const p=body.plugin||{}; const d=p.v238Diagnostics||{}; const cg=contactGeometry(body);
+    const cx=(Number.isFinite(d.contactMinX)&&Number.isFinite(d.contactMaxX)) ? (d.contactMinX+d.contactMaxX)/2 : NaN;
+    const centerOffset=Number.isFinite(cx) ? cx-body.position.x : NaN;
+    return [
+      state.index+1,phase,state.frame,num(performance.now()-state.startedAt,1),state.landingFrame===null?'':state.landingFrame,
+      num(body.position.x),num(body.position.y),num(body.velocity.x,5),num(body.velocity.y,5),num(body.speed,5),num(body.angularVelocity,6),num(body.angle,6),
+      body.isSleeping?1:0,d.groundContact?1:0,
+      num(p.debugMass||body.mass,5),num(p.debugInertia||body.inertia,3),num(p.debugComOffset,3),num(p.debugFootprintWidth,3),
+      num(cg.bottomWidth1),num(cg.bottomWidth2),num(cg.bottomWidth4),num(cg.bottomWidth8),num(cg.contactWidth),num(cg.contactCenterOffset),cg.contactPoints,cg.contactParts,
+      num(p.debugAspectRatio,4),Number(p.debugPartCount||0),Number(p.debugTriangulatedCount||0),Number(p.debugRegionCount||0),Number(p.debugRawRegionCount||0),Number(p.debugContourVertexCount||0),
+      num(d.beforeVx,5),num(d.beforeVy,5),num(d.beforeAngularVelocity,6),num(d.deltaVx,5),num(d.deltaVy,5),num(d.deltaAngularVelocity,6),
+      num(d.normalX,6),num(d.normalY,6),num(d.depth,6),num(d.separation,6),Number(d.pairCount||0),Number(d.contactCount||0),Number(d.supportCount||0),Number(d.contactPartCount||0),
+      num(d.contactMinX),num(d.contactMaxX),num(d.contactMeanX),num(centerOffset)
+    ].join(',');
+  }
+
+  function parseRows(rows){ return rows.map(r=>r.split(',')).filter(a=>a.length===csvHeader.length); }
+  function colIndex(name){ return csvHeader.indexOf(name); }
+  function nums(arr,name){ const i=colIndex(name); return arr.map(a=>Number(a[i])).filter(Number.isFinite); }
+
+  function finishPiece(status){
+    const arr=parseRows(state.rows); const first=arr[0]||[]; const land=state.landingFrame===null?arr[0]:arr[Math.min(state.landingFrame,Math.max(0,arr.length-1))]||arr[0];
+    const post=state.landingFrame===null?[]:arr.filter(a=>Number(a[colIndex('frame')])>=state.landingFrame);
+    const xs=nums(post,'x'),ys=nums(post,'y'),angs=nums(post,'angle'),vxs=nums(post,'velocity_x'),vys=nums(post,'velocity_y'),avs=nums(post,'angular_velocity');
+    const minY=ys.length?Math.min(...ys):NaN; const landingY=Number(land?.[colIndex('y')]);
+    const sleeping=arr.find(a=>Number(a[colIndex('sleeping')])===1); const sleepFrame=sleeping?Number(sleeping[colIndex('frame')]):'';
+    const last=arr[arr.length-1]||[];
+    const maxBounce=Number.isFinite(landingY)&&Number.isFinite(minY)?Math.max(0,landingY-minY):NaN;
+    const firstDiag=first;
+    state.summaries.push([
+      state.run,state.index+1,status,arr.length,state.landingFrame===null?'':state.landingFrame,state.landingFrame===null?0:Math.max(0,arr.length-state.landingFrame-1),
+      Number(firstDiag[colIndex('mass')]),Number(firstDiag[colIndex('inertia')]),Number(firstDiag[colIndex('com_offset_px')]),Number(firstDiag[colIndex('footprint_width_px')]),
+      Number(land?.[colIndex('contact_width_px')]),Number(land?.[colIndex('contact_center_offset_px')]),Number(land?.[colIndex('contact_points')]),Number(land?.[colIndex('contact_parts')]),
+      Number(land?.[colIndex('velocity_x')]),Number(land?.[colIndex('velocity_y')]),Number(land?.[colIndex('angular_velocity')]),Number(land?.[colIndex('delta_velocity_x')]),Number(land?.[colIndex('delta_velocity_y')]),Number(land?.[colIndex('delta_angular_velocity')]),
+      vxs.length?Math.max(...vxs.map(Math.abs)):NaN,vys.length?Math.max(...vys.map(Math.abs)):NaN,avs.length?Math.max(...avs.map(Math.abs)):NaN,
+      xs.length?Math.max(...xs)-Math.min(...xs):NaN,ys.length?Math.max(...ys)-Math.min(...ys):NaN,angs.length?Math.max(...angs)-Math.min(...angs):NaN,
+      maxBounce,sleepFrame,last[colIndex('sleeping')]==='1'?1:0,last[colIndex('ground_contact')]==='1'?1:0,
+      Number(firstDiag[colIndex('physics_parts')]),Number(firstDiag[colIndex('triangles')]),Number(firstDiag[colIndex('regions')]),Number(firstDiag[colIndex('raw_regions')]),Number(firstDiag[colIndex('contour_vertices')])
+    ]);
+    state.allRows.push(...state.rows);
+  }
+
+  function startPiece(index){
+    setupPhysics();
+    const x=state.stageW/2,y=Math.max(80,state.stageH*0.18);
+    const p=Piece.create(index,state.images,x,y); p.body.plugin=p.body.plugin||{}; p.body.plugin.debugFixedPiece=true;
+    Physics.add(p.body); Physics.hold(p.body,x,y,0); Physics.release(p.body);
+    state.index=index; state.frame=0; state.startedAt=performance.now(); state.landingFrame=null; state.rows=[]; state.piece=p; state.body=p.body;
+  }
+
+  function renderMeasurementFrame(){
+    if(!state.piece || !state.body) return;
+    Renderer.clear();
+    Renderer.drawGround(state.stageH-12,0,state.baseWidth);
+    Renderer.drawPiece(state.piece,0);
+  }
+
+  function tick(){
+    if(!state.running) return;
+    Physics.step(DT);
+    renderMeasurementFrame();
+    const body=state.body;
+    const contact=groundContact(body);
+    if(state.landingFrame===null && contact){ state.landingFrame=state.frame; }
+    const phase=state.landingFrame===null?'falling':'post_landing';
+    state.rows.push(rowFor(body,phase));
+    if(state.landingFrame!==null && state.frame-state.landingFrame>=POST_LAND_FRAMES){
+      finishPiece('complete');
+      if(state.index+1<state.images.length){
+        setStatus(`${VERSION} 計測中: ${state.index+2}/${state.images.length}`); startPiece(state.index+1);
+      }else{ finishRun(); return; }
+    }else if(state.frame>=MAX_FALL_FRAMES){
+      finishPiece('timeout');
+      if(state.index+1<state.images.length){ startPiece(state.index+1); }
+      else { finishRun(); return; }
+    }else{ state.frame++; }
+    state.raf=requestAnimationFrame(tick);
+  }
+
+  function csvLine(values){ return values.map(v=>{ const s=String(v??''); return /[,"\r\n]/.test(s)?`"${s.replace(/"/g,'""')}"`:s; }).join(','); }
+  function makeCsv(header,rows){ return '\ufeff'+header.join(',')+'\n'+rows.map(r=>csvLine(r)).join('\n')+'\n'; }
+
+  function metadataRows(){
+    const h=['piece','asset','image_width','image_height','mass','inertia','com_offset_px','footprint_width_px','aspect_ratio','physics_parts','triangles','regions','raw_regions','contour_vertices'];
+    const rows=state.images.map((im,i)=>{
+      // Create a temporary body only if needed for metadata.
+      setupPhysics(); const p=Piece.create(i,state.images,state.stageW/2,Math.max(80,state.stageH*0.18)); const b=p.body,pl=b.plugin||{};
+      return [i+1,`assets/${pad2(i+1)}.${im.src.includes('.PNG')?'PNG':'png'}`,im.naturalWidth||im.width,im.naturalHeight||im.height,num(pl.debugMass||b.mass,5),num(pl.debugInertia||b.inertia,3),num(pl.debugComOffset,3),num(pl.debugFootprintWidth,3),num(pl.debugAspectRatio,4),Number(pl.debugPartCount||0),Number(pl.debugTriangulatedCount||0),Number(pl.debugRegionCount||0),Number(pl.debugRawRegionCount||0),Number(pl.debugContourVertexCount||0)];
+    });
+    clearDynamicBodies(); return {h,rows};
+  }
+
+  function validationRows(){
+    const map=new Map();
+    for(const row of state.allRows){ const p=Number(row.split(',')[0]); if(!map.has(p)) map.set(p,[]); map.get(p).push(row); }
+    const rows=[];
+    for(let i=1;i<=state.images.length;i++){
+      const rs=map.get(i)||[]; const parsed=parseRows(rs); const land=parsed.find(a=>a[colIndex('ground_contact')]==='1'); const lf=land?Number(land[colIndex('frame')]):'';
+      rows.push([state.run,i,rs.length?'complete':'missing',rs.length,lf,lf===''?'':lf+POST_LAND_FRAMES+1,rs.length>0,lf!=='',lf!==''&&rs.length>=lf+POST_LAND_FRAMES+1]);
+    }
+    rows.push([state.run,'RUN_TOTAL',state.images.length===rows.length?'complete':'incomplete',state.allRows.length,'','','','','']); return rows;
+  }
+
+  function crc32(bytes){ let crc=0xffffffff; for(let i=0;i<bytes.length;i++){ crc^=bytes[i]; for(let j=0;j<8;j++) crc=(crc>>>1)^((crc&1)?0xedb88320:0); } return (crc^0xffffffff)>>>0; }
+  const u16=(v,o,n)=>v.setUint16(o,n,true), u32=(v,o,n)=>v.setUint32(o,n>>>0,true);
+  function zip(files){
+    const enc=new TextEncoder(),chunks=[],central=[]; let offset=0; const now=new Date(),year=Math.max(1980,now.getFullYear()),dt=(now.getHours()<<11)|(now.getMinutes()<<5)|Math.floor(now.getSeconds()/2),dd=((year-1980)<<9)|((now.getMonth()+1)<<5)|now.getDate();
+    for(const f of files){ const name=enc.encode(f.name),data=enc.encode(f.content),crc=crc32(data),b=new ArrayBuffer(30+name.length+data.length),v=new DataView(b); u32(v,0,0x04034b50);u16(v,4,20);u16(v,6,0);u16(v,8,0);u16(v,10,dt);u16(v,12,dd);u32(v,14,crc);u32(v,18,data.length);u32(v,22,data.length);u16(v,26,name.length);u16(v,28,0);new Uint8Array(b,30,name.length).set(name);new Uint8Array(b,30+name.length,data.length).set(data);chunks.push(b);central.push({name,crc,size:data.length,offset});offset+=b.byteLength; }
+    const co=offset; for(const e of central){ const b=new ArrayBuffer(46+e.name.length),v=new DataView(b);u32(v,0,0x02014b50);u16(v,4,20);u16(v,6,20);u16(v,8,0);u16(v,10,0);u16(v,12,dt);u16(v,14,dd);u32(v,16,e.crc);u32(v,20,e.size);u32(v,24,e.size);u16(v,28,e.name.length);u16(v,30,0);u16(v,32,0);u16(v,34,0);u16(v,36,0);u32(v,38,0);u32(v,42,e.offset);new Uint8Array(b,46,e.name.length).set(e.name);chunks.push(b);offset+=b.byteLength; }
+    const end=new ArrayBuffer(22),v=new DataView(end);u32(v,0,0x06054b50);u16(v,8,central.length);u16(v,10,central.length);u32(v,12,offset-co);u32(v,16,co);chunks.push(end);return new Blob(chunks,{type:'application/zip'});
+  }
+
+  function finishRun(){
+    state.running=false; state.piece=null; state.body=null; cancelAnimationFrame(state.raf); clearDynamicBodies();
+    const meta=metadataRows();
+    const files=[
+      {name:'metadata.csv',content:makeCsv(meta.h,meta.rows)},
+      {name:'summary.csv',content:makeCsv(summaryHeader,state.summaries)},
+      {name:'validation.csv',content:makeCsv(validationHeader,validationRows())}
+    ];
+    const by=new Map(); for(const r of state.allRows){ const p=Number(r.split(',')[0]); if(!by.has(p))by.set(p,[]);by.get(p).push(r); }
+    for(let i=1;i<=state.images.length;i++) files.push({name:`${pad2(i)}.csv`,content:'\ufeff'+csvHeader.join(',')+'\n'+(by.get(i)||[]).map(r=>r.split(',').map(v=>`"${String(v).replace(/"/g,'""')}"`).join(',')).join('\n')+'\n'});
+    const blob=zip(files),url=URL.createObjectURL(blob),a=$('measurementDownload');
+    if(a){ a.href=url;a.download=`JinSanTowerGame_${VERSION}_run${state.run}_collision_diagnostics.zip`;a.textContent=`${VERSION} 計測ZIPを保存`;a.classList.remove('hidden'); }
+    const b=$('measurementButton'); if(b){b.disabled=false;b.textContent='全ピース自動計測';}
+    setStatus(`${VERSION} 計測完了（${state.images.length}ピース / run ${state.run}）`);
+    const s=$('measurementStatus'); if(s) s.textContent=`完了。run ${state.run} のZIPを保存してください。次回はrun番号を変更して再計測。`;
+  }
+
+  function start(){
+    if(state.running) return;
+    const run=prompt(`${VERSION} 自動計測\n今回のRun番号を入力してください（例: 1）`,String(state.run));
+    if(run===null) return;
+    const n=parseInt(run,10); if(!Number.isInteger(n)||n<1){ alert('Run番号は1以上の整数を入力してください。'); return; }
+    state.run=n; state.index=0;state.frame=0;state.rows=[];state.allRows=[];state.summaries=[];state.piece=null;state.body=null;state.running=true;
+    const modal=$('modeModal'); if(modal) modal.classList.add('hidden');
+    const a=$('measurementDownload'); if(a) a.classList.add('hidden');
+    const b=$('measurementButton'); if(b)b.disabled=true;
+    setStatus(`${VERSION} 計測開始…`); startPiece(0); state.raf=requestAnimationFrame(tick);
+  }
+
+  async function init(){
+    const params=new URLSearchParams(location.search); if(params.get('debug')!=='on') return;
+    const button=$('measurementButton'); if(!button) return;
+    // Remove listeners installed by older measurement scripts by replacing the node.
+    const clean=button.cloneNode(true); button.replaceWith(clean);
+    clean.addEventListener('click',start);
+    state.images=await discoverImages();
+    const title=document.querySelector('.measurementTitle'); if(title) title.textContent=`物理挙動デバッグ ${VERSION}`;
+    const status=$('measurementStatus'); if(status) status.textContent=`${state.images.length}ピース検出。着地衝突診断を計測できます。`;
+    const span=clean.querySelector('span'); if(span) span.textContent='着地前後の衝突データを記録';
+  }
+
+  if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',init); else init();
+})();
