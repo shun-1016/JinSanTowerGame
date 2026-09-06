@@ -1,9 +1,8 @@
-/* v22.5 - v22.1 geometry + moderate landing stabilization + normal game-over fix */
+/* v1.25.0 - exact-alpha physics with 4x sub-step experiment */
 const Physics = (() => {
   const {Engine,World,Bodies,Body,Sleeping}=Matter;
+  const SUB_STEPS=4;
   const engine=Engine.create({
-    // v20.5: final stability tuning. Keep enough position iterations to
-    // resolve stacked contacts cleanly, while damping tiny residual motion.
     enableSleeping:true,
     positionIterations:12,
     velocityIterations:8,
@@ -11,18 +10,12 @@ const Physics = (() => {
   });
   engine.gravity.x=0;engine.gravity.y=1;engine.gravity.scale=0.001;
   const world=engine.world;
-  let ground=null;
-  let sideWalls=[];
+  let ground=null,sideWalls=[];
 
   function setup(width,groundY,baseWidth=width,isEndless=false){
     if(ground) World.remove(world,ground);
-    if(sideWalls.length){
-      World.remove(world,sideWalls);
-      sideWalls=[];
-    }
-    const bw=Math.max(100,baseWidth);
-    const left=(width-bw)/2;
-    const right=left+bw;
+    if(sideWalls.length){World.remove(world,sideWalls);sideWalls=[];}
+    const bw=Math.max(100,baseWidth),left=(width-bw)/2,right=left+bw;
     ground=Bodies.rectangle((left+right)/2,groundY+14,bw,28,{
       isStatic:true,label:'ground',friction:0.85,frictionStatic:1,restitution:0
     });
@@ -38,493 +31,112 @@ const Physics = (() => {
   }
 
   function cross(a,b,c){return (b.x-a.x)*(c.y-a.y)-(b.y-a.y)*(c.x-a.x);}
-  function area(poly){
-    let a=0;
-    for(let i=0;i<poly.length;i++){
-      const p=poly[i],q=poly[(i+1)%poly.length];
-      a+=p.x*q.y-q.x*p.y;
-    }
-    return a/2;
-  }
-  function pointInTriangle(p,a,b,c){
-    const c1=cross(a,b,p),c2=cross(b,c,p),c3=cross(c,a,p);
-    const eps=1e-8;
-    const hasNeg=c1<-eps||c2<-eps||c3<-eps;
-    const hasPos=c1>eps||c2>eps||c3>eps;
-    return !(hasNeg&&hasPos);
-  }
+  function area(poly){let a=0;for(let i=0;i<poly.length;i++){const p=poly[i],q=poly[(i+1)%poly.length];a+=p.x*q.y-q.x*p.y;}return a/2;}
+  function pointInTriangle(p,a,b,c){const c1=cross(a,b,p),c2=cross(b,c,p),c3=cross(c,a,p),eps=1e-8;return !((c1<-eps||c2<-eps||c3<-eps)&&(c1>eps||c2>eps||c3>eps));}
   function samePoint(a,b){return Math.hypot(a.x-b.x,a.y-b.y)<1e-6;}
-
-  // Complete ear clipping. A partial result is never passed to Matter.js.
   function segmentsIntersect(a,b,c,d){
-    const ab1=cross(a,b,c),ab2=cross(a,b,d),cd1=cross(c,d,a),cd2=cross(c,d,b);
-    const eps=1e-9;
-    const on=(p,q,r)=>Math.abs(cross(p,q,r))<=eps &&
-      p.x>=Math.min(q.x,r.x)-eps&&p.x<=Math.max(q.x,r.x)+eps&&
-      p.y>=Math.min(q.y,r.y)-eps&&p.y<=Math.max(q.y,r.y)+eps;
-    if((ab1>eps&&ab2<-eps || ab1<-eps&&ab2>eps) &&
-       (cd1>eps&&cd2<-eps || cd1<-eps&&cd2>eps)) return true;
+    const ab1=cross(a,b,c),ab2=cross(a,b,d),cd1=cross(c,d,a),cd2=cross(c,d,b),eps=1e-9;
+    const on=(p,q,r)=>Math.abs(cross(p,q,r))<=eps&&p.x>=Math.min(q.x,r.x)-eps&&p.x<=Math.max(q.x,r.x)+eps&&p.y>=Math.min(q.y,r.y)-eps&&p.y<=Math.max(q.y,r.y)+eps;
+    if((ab1>eps&&ab2<-eps||ab1<-eps&&ab2>eps)&&(cd1>eps&&cd2<-eps||cd1<-eps&&cd2>eps))return true;
     return on(c,a,b)||on(d,a,b)||on(a,c,d)||on(b,c,d);
   }
-
   function hasSelfIntersection(poly){
-    const n=poly.length;
-    for(let i=0;i<n;i++){
-      const a=poly[i],b=poly[(i+1)%n];
-      for(let j=i+1;j<n;j++){
-        if(j===i || (j+1)%n===i || (i+1)%n===j) continue;
-        const c=poly[j],d=poly[(j+1)%n];
-        if(segmentsIntersect(a,b,c,d)) return {yes:true,edgeA:i,edgeB:j};
-      }
-    }
+    for(let i=0;i<poly.length;i++){const a=poly[i],b=poly[(i+1)%poly.length];for(let j=i+1;j<poly.length;j++){if(j===i||(j+1)%poly.length===i||(i+1)%poly.length===j)continue;if(segmentsIntersect(a,b,poly[j],poly[(j+1)%poly.length]))return {yes:true,edgeA:i,edgeB:j};}}
     return {yes:false,edgeA:-1,edgeB:-1};
   }
-
   function triangulateDetailed(input){
-    const diag={
-      inputCount:input?input.length:0,
-      cleanCount:0,
-      area:0,
-      winding:'-',
-      selfIntersection:false,
-      selfIntersectionEdges:null,
-      triangles:0,
-      failed:false,
-      failReason:'NONE',
-      failIteration:-1,
-      remainingVertices:0
-    };
+    const diag={inputCount:input?input.length:0,cleanCount:0,area:0,winding:'-',selfIntersection:false,selfIntersectionEdges:null,triangles:0,failed:false,failReason:'NONE',failIteration:-1,remainingVertices:0};
     if(!input||input.length<3){diag.failed=true;diag.failReason='TOO_FEW_POINTS';return {triangles:[],diag};}
-    const poly=[];
-    for(const p of input){
-      if(!poly.length||!samePoint(poly[poly.length-1],p)) poly.push({x:p.x,y:p.y});
-    }
+    const poly=[];for(const p of input){if(!poly.length||!samePoint(poly[poly.length-1],p))poly.push({x:p.x,y:p.y});}
     if(poly.length>=2&&samePoint(poly[0],poly[poly.length-1]))poly.pop();
-    diag.cleanCount=poly.length;
-    if(poly.length<3){diag.failed=true;diag.failReason='TOO_FEW_CLEAN_POINTS';return {triangles:[],diag};}
-    diag.area=area(poly);
-    diag.winding=diag.area>0?'CCW':(diag.area<0?'CW':'ZERO');
-    const si=hasSelfIntersection(poly);
-    diag.selfIntersection=si.yes;
-    diag.selfIntersectionEdges=si.yes?`${si.edgeA}/${si.edgeB}`:null;
+    diag.cleanCount=poly.length;if(poly.length<3){diag.failed=true;diag.failReason='TOO_FEW_CLEAN_POINTS';return {triangles:[],diag};}
+    diag.area=area(poly);diag.winding=diag.area>0?'CCW':diag.area<0?'CW':'ZERO';
+    const si=hasSelfIntersection(poly);diag.selfIntersection=si.yes;diag.selfIntersectionEdges=si.yes?`${si.edgeA}/${si.edgeB}`:null;
     if(Math.abs(diag.area)<0.05){diag.failed=true;diag.failReason='ZERO_AREA';return {triangles:[],diag};}
     if(diag.area<0){poly.reverse();diag.area=-diag.area;diag.winding='CCW';}
-
-    const indices=poly.map((_,i)=>i),triangles=[];
-    let guard=0;
+    const indices=poly.map((_,i)=>i),triangles=[];let guard=0;
     while(indices.length>3){
-      if(guard++>poly.length*poly.length*4){
-        diag.failed=true;diag.failReason='GUARD_LIMIT';diag.failIteration=guard;diag.remainingVertices=indices.length;
-        return {triangles:[],diag};
-      }
+      if(guard++>poly.length*poly.length*4){diag.failed=true;diag.failReason='GUARD_LIMIT';diag.failIteration=guard;diag.remainingVertices=indices.length;return {triangles:[],diag};}
       let earFound=false;
       for(let i=0;i<indices.length;i++){
-        const ia=indices[(i-1+indices.length)%indices.length],ib=indices[i],ic=indices[(i+1)%indices.length];
-        const a=poly[ia],b=poly[ib],c=poly[ic];
+        const ia=indices[(i-1+indices.length)%indices.length],ib=indices[i],ic=indices[(i+1)%indices.length],a=poly[ia],b=poly[ib],c=poly[ic];
         if(cross(a,b,c)<=1e-7)continue;
-        let contains=false;
-        for(const id of indices){
-          if(id===ia||id===ib||id===ic)continue;
-          if(pointInTriangle(poly[id],a,b,c)){contains=true;break;}
-        }
-        if(contains)continue;
-        triangles.push([a,b,c]);
-        indices.splice(i,1);
-        earFound=true;
-        break;
+        let contains=false;for(const id of indices){if(id===ia||id===ib||id===ic)continue;if(pointInTriangle(poly[id],a,b,c)){contains=true;break;}}
+        if(contains)continue;triangles.push([a,b,c]);indices.splice(i,1);earFound=true;break;
       }
-      if(!earFound){
-        diag.failed=true;
-        diag.failReason='NO_EAR_FOUND';
-        diag.failIteration=guard;
-        diag.remainingVertices=indices.length;
-        return {triangles:[],diag};
-      }
+      if(!earFound){diag.failed=true;diag.failReason='NO_EAR_FOUND';diag.failIteration=guard;diag.remainingVertices=indices.length;return {triangles:[],diag};}
     }
     if(indices.length===3)triangles.push([poly[indices[0]],poly[indices[1]],poly[indices[2]]]);
-    const valid=triangles.filter(t=>Math.abs(area(t))>0.05);
-    diag.triangles=valid.length;
-    if(valid.length!==triangles.length){
-      diag.failed=true;diag.failReason='DEGENERATE_TRIANGLE';diag.remainingVertices=indices.length;
-      return {triangles:[],diag};
-    }
+    const valid=triangles.filter(t=>Math.abs(area(t))>0.05);diag.triangles=valid.length;
+    if(valid.length!==triangles.length){diag.failed=true;diag.failReason='DEGENERATE_TRIANGLE';diag.remainingVertices=indices.length;return {triangles:[],diag};}
     return {triangles:valid,diag};
   }
-
-  function triangulate(input){
-    return triangulateDetailed(input).triangles;
-  }
-
-  function makeConvexPart(poly,options){
-    const cx=poly.reduce((sum,p)=>sum+p.x,0)/poly.length;
-    const cy=poly.reduce((sum,p)=>sum+p.y,0)/poly.length;
-    return Bodies.fromVertices(cx,cy,[poly],{
-      ...options,
-      label:'piece-part'
-    },false,0.001,0.001,0.001);
-  }
-
   function samePointExact(a,b){return Math.abs(a.x-b.x)<1e-6&&Math.abs(a.y-b.y)<1e-6;}
-
-  // Combine adjacent triangles whenever their union is still a convex polygon.
-  // This keeps the outer boundary identical to the triangulation while greatly
-  // reducing the number of Matter.js compound parts.
+  function simplifyPolygonCollinear(poly){if(poly.length<4)return poly.slice();const out=[];for(let i=0;i<poly.length;i++){const a=poly[(i-1+poly.length)%poly.length],b=poly[i],c=poly[(i+1)%poly.length];if(Math.abs(cross(a,b,c))>1e-7)out.push(b);}return out;}
+  function isConvex(poly){let sign=0;for(let i=0;i<poly.length;i++){const cr=cross(poly[i],poly[(i+1)%poly.length],poly[(i+2)%poly.length]);if(Math.abs(cr)<=1e-7)continue;const s=cr>0?1:-1;if(!sign)sign=s;else if(s!==sign)return false;}return sign!==0;}
   function mergeTwoConvexPolys(a,b){
-    const edges=[];
-    const addEdge=(p,q)=>{
-      for(let i=0;i<edges.length;i++){
-        if(samePointExact(edges[i][0],q)&&samePointExact(edges[i][1],p)){
-          edges.splice(i,1); return;
-        }
-      }
-      edges.push([p,q]);
-    };
-    for(let i=0;i<a.length;i++) addEdge(a[i],a[(i+1)%a.length]);
-    for(let i=0;i<b.length;i++) addEdge(b[i],b[(i+1)%b.length]);
-    if(edges.length<3) return null;
-
-    const outgoing=new Map();
-    const key=p=>`${p.x},${p.y}`;
-    for(const e of edges){
-      const k=key(e[0]);
-      if(!outgoing.has(k)) outgoing.set(k,[]);
-      outgoing.get(k).push(e);
-    }
-    const start=edges[0][0];
-    const poly=[start];
-    let cur=edges[0][1];
-    edges.splice(0,1);
-    let guard=0;
-    while(!samePointExact(cur,start)&&guard++<edges.length+5){
-      poly.push(cur);
-      const list=outgoing.get(key(cur))||[];
-      const idx=list.findIndex(e=>edges.includes(e));
-      if(idx<0) return null;
-      const e=list[idx];
-      const ei=edges.indexOf(e);
-      edges.splice(ei,1);
-      cur=e[1];
-    }
-    if(!samePointExact(cur,start)||poly.length<3||edges.length) return null;
-
-    const clean=simplifyPolygonCollinear(poly);
-    if(clean.length<3) return null;
-    const ar=area(clean);
-    if(ar<0) clean.reverse();
-    if(Math.abs(area(clean))<0.05) return null;
-    if(!isConvex(clean)) return null;
-    return clean;
+    const edges=[];const addEdge=(p,q)=>{for(let i=0;i<edges.length;i++){if(samePointExact(edges[i][0],q)&&samePointExact(edges[i][1],p)){edges.splice(i,1);return;}}edges.push([p,q]);};
+    for(let i=0;i<a.length;i++)addEdge(a[i],a[(i+1)%a.length]);for(let i=0;i<b.length;i++)addEdge(b[i],b[(i+1)%b.length]);if(edges.length<3)return null;
+    const outgoing=new Map(),key=p=>`${p.x},${p.y}`;for(const e of edges){const k=key(e[0]);if(!outgoing.has(k))outgoing.set(k,[]);outgoing.get(k).push(e);}
+    const start=edges[0][0],poly=[start];let cur=edges[0][1];edges.splice(0,1);let guard=0;
+    while(!samePointExact(cur,start)&&guard++<edges.length+5){poly.push(cur);const list=outgoing.get(key(cur))||[];const e=list.find(e=>edges.includes(e));if(!e)return null;edges.splice(edges.indexOf(e),1);cur=e[1];}
+    if(!samePointExact(cur,start)||poly.length<3||edges.length)return null;
+    const clean=simplifyPolygonCollinear(poly);if(clean.length<3)return null;if(area(clean)<0)clean.reverse();if(Math.abs(area(clean))<0.05||!isConvex(clean))return null;return clean;
   }
-
-  function simplifyPolygonCollinear(poly){
-    if(poly.length<4) return poly.slice();
-    const out=[];
-    for(let i=0;i<poly.length;i++){
-      const a=poly[(i-1+poly.length)%poly.length],b=poly[i],c=poly[(i+1)%poly.length];
-      if(Math.abs(cross(a,b,c))>1e-7) out.push(b);
-    }
-    return out;
-  }
-
-  function isConvex(poly){
-    let sign=0;
-    for(let i=0;i<poly.length;i++){
-      const cr=cross(poly[i],poly[(i+1)%poly.length],poly[(i+2)%poly.length]);
-      if(Math.abs(cr)<=1e-7) continue;
-      const s=cr>0?1:-1;
-      if(!sign) sign=s;
-      else if(s!==sign) return false;
-    }
-    return sign!==0;
-  }
-
   function convexDecompose(triangles){
-    // Start with one polygon per triangulation triangle. Repeatedly merge the
-    // first pair whose shared edge produces a convex union. For the small
-    // ~10-250 triangle counts used here this O(n^2) greedy pass is inexpensive,
-    // while avoiding the hundreds of tiny contacts that caused tower jitter.
-    let polys=triangles.map(t=>t.map(p=>({x:p.x,y:p.y})));
-    let changed=true;
-    while(changed){
-      changed=false;
-      outer:
-      for(let i=0;i<polys.length;i++){
-        for(let j=i+1;j<polys.length;j++){
-          let shared=false;
-          for(let ai=0;ai<polys[i].length&&!shared;ai++){
-            const a1=polys[i][ai],a2=polys[i][(ai+1)%polys[i].length];
-            for(let bj=0;bj<polys[j].length;bj++){
-              const b1=polys[j][bj],b2=polys[j][(bj+1)%polys[j].length];
-              if(samePointExact(a1,b2)&&samePointExact(a2,b1)){shared=true;break;}
-            }
-          }
-          if(!shared) continue;
-          const merged=mergeTwoConvexPolys(polys[i],polys[j]);
-          if(merged){
-            polys[i]=merged;
-            polys.splice(j,1);
-            changed=true;
-            break outer;
-          }
-        }
-      }
-    }
+    let polys=triangles.map(t=>t.map(p=>({x:p.x,y:p.y}))),changed=true;
+    while(changed){changed=false;outer:for(let i=0;i<polys.length;i++)for(let j=i+1;j<polys.length;j++){
+      let shared=false;for(let ai=0;ai<polys[i].length&&!shared;ai++){const a1=polys[i][ai],a2=polys[i][(ai+1)%polys[i].length];for(let bj=0;bj<polys[j].length;bj++){if(samePointExact(a1,polys[j][(bj+1)%polys[j].length])&&samePointExact(a2,polys[j][bj])){shared=true;break;}}}
+      if(!shared)continue;const merged=mergeTwoConvexPolys(polys[i],polys[j]);if(merged){polys[i]=merged;polys.splice(j,1);changed=true;break outer;}
+    }}
     return polys;
   }
-
   function mergeRegionPolys(regions){
-    // v22.2: reduce compound-body part count before triangulation. The B案
-    // regions are axis-aligned opaque rectangles. Merge only regions that
-    // share a complete edge and whose union remains convex. This preserves
-    // transparent gaps and the visible silhouette, while removing internal
-    // seams that otherwise become many tiny Matter.js collision parts.
-    let polys=regions.map(r=>r.map(p=>({x:p.x,y:p.y})));
-    let changed=true;
-    while(changed){
-      changed=false;
-      outer:
-      for(let i=0;i<polys.length;i++){
-        for(let j=i+1;j<polys.length;j++){
-          const a=polys[i],b=polys[j];
-          let shared=false;
-          for(let ai=0;ai<a.length&&!shared;ai++){
-            const a1=a[ai],a2=a[(ai+1)%a.length];
-            for(let bj=0;bj<b.length;bj++){
-              const b1=b[bj],b2=b[(bj+1)%b.length];
-              if(samePointExact(a1,b2)&&samePointExact(a2,b1)){
-                shared=true;
-                break;
-              }
-            }
-          }
-          if(!shared) continue;
-          const merged=mergeTwoConvexPolys(a,b);
-          if(!merged) continue;
-          polys[i]=merged;
-          polys.splice(j,1);
-          changed=true;
-          break outer;
-        }
-      }
-    }
+    let polys=regions.map(r=>r.map(p=>({x:p.x,y:p.y}))),changed=true;
+    while(changed){changed=false;outer:for(let i=0;i<polys.length;i++)for(let j=i+1;j<polys.length;j++){
+      const a=polys[i],b=polys[j];let shared=false;
+      for(let ai=0;ai<a.length&&!shared;ai++){const a1=a[ai],a2=a[(ai+1)%a.length];for(let bj=0;bj<b.length;bj++){if(samePointExact(a1,b[(bj+1)%b.length])&&samePointExact(a2,b[bj])){shared=true;break;}}}
+      if(!shared)continue;const merged=mergeTwoConvexPolys(a,b);if(!merged)continue;polys[i]=merged;polys.splice(j,1);changed=true;break outer;
+    }}
     return polys;
   }
-
   function createPieceBody(x,y,w,h,shape){
-    const options={
-      label:'piece',
-      friction:0.55,
-      frictionStatic:0.70,
-      frictionAir:0.015,
-      restitution:0,
-      density:0.002,
-      sleepThreshold:60,
-      slop:0.05
-    };
-
-    // v22.1 B案:
-    // Build the collision body from multiple opaque regions generated from
-    // the alpha mask. This avoids the fragile "outer contour + hole bridge"
-    // conversion used by v22.0. Transparent areas are never filled.
-    const rawRegions=(shape&&Array.isArray(shape.regions))?shape.regions:[];
-    const regions=rawRegions.length?mergeRegionPolys(rawRegions):[];
-    const allTriangles=[];
-    let failed=false;
-    let failReason='NONE';
-    let failIteration=-1;
-    let remainingVertices=0;
-
-    for(const region of regions){
-      const result=triangulateDetailed(region);
-      if(result.diag.failed){
-        failed=true;
-        if(failReason==='NONE') failReason=result.diag.failReason||'REGION_TRIANGULATION_FAILED';
-        failIteration=result.diag.failIteration;
-        remainingVertices=result.diag.remainingVertices;
-        continue;
-      }
-      allTriangles.push(...result.triangles);
-    }
-
-    // Backward-compatible fallback for a shape object that has no regions.
-    if(!regions.length && shape&&shape.contour&&shape.contour.length>=3){
-      const result=triangulateDetailed(shape.contour);
-      if(result.diag.failed){
-        failed=true;
-        failReason=result.diag.failReason||'CONTOUR_TRIANGULATION_FAILED';
-        failIteration=result.diag.failIteration;
-        remainingVertices=result.diag.remainingVertices;
-      }else{
-        allTriangles.push(...result.triangles);
-      }
-    }
-
-    const convexPolys=allTriangles.length?convexDecompose(allTriangles):[];
-    let body=null;
-    let fallback=false;
-
-    if(convexPolys.length){
-      const parts=convexPolys.map(poly=>makeConvexPart(poly,options));
-      if(parts.length){
-        body=Body.create({...options,parts:parts.slice()});
-        const comLocal={x:body.position.x,y:body.position.y};
-        const visualOffset={x:-comLocal.x,y:-comLocal.y};
-        Body.setPosition(body,{x,y});
-        body.plugin=body.plugin||{};
-        body.plugin.imageVisualOffset=visualOffset;
-        body.plugin.debugCompoundCOMLocal=comLocal;
-      }
-    }
-
-    if(!body){
-      body=Bodies.rectangle(x,y,Math.max(10,w),Math.max(10,h),options);
-      fallback=true;
-      body.plugin=body.plugin||{};
-      body.plugin.imageVisualOffset={x:0,y:0};
-    }
-
-    const areaTotal=allTriangles.reduce((sum,t)=>sum+Math.abs(area(t)),0);
-    const diag={
-      inputCount:regions.reduce((sum,r)=>sum+r.length,0),
-      cleanCount:regions.reduce((sum,r)=>sum+r.length,0),
-      area:areaTotal,
-      winding:'CCW',
-      selfIntersection:false,
-      selfIntersectionEdges:null,
-      triangles:allTriangles.length,
-      failed:failed,
-      failReason:failed?failReason:'NONE',
-      failIteration,
-      remainingVertices
-    };
-
-    body.plugin=body.plugin||{};
-    body.plugin.imageWidth=w;
-    body.plugin.imageHeight=h;
-    body.plugin.debugContours=shape&&shape.debugContours?shape.debugContours:[];
-    body.plugin.debugContourVertexCount=shape&&shape.pointCount||0;
-    body.plugin.debugTriangulatedCount=allTriangles.length;
-    body.plugin.debugConvexPartCount=convexPolys.length;
-    body.plugin.debugTriangulation=diag;
-    body.plugin.debugFallback=fallback;
-    body.plugin.debugShapeReady=!fallback&&allTriangles.length>0;
-    body.plugin.debugBodyCreated=true;
-    body.plugin.debugHoleCount=shape&&shape.holeCount||0;
-    body.plugin.debugRegionCount=regions.length;
-    body.plugin.debugRawRegionCount=rawRegions.length;
-    body.plugin.debugPartCentroids=convexPolys.map(poly=>({
-      x:poly.reduce((sum,p)=>sum+p.x,0)/poly.length,
-      y:poly.reduce((sum,p)=>sum+p.y,0)/poly.length
-    }));
-    const comOffset=body.plugin&&body.plugin.imageVisualOffset?body.plugin.imageVisualOffset:{x:0,y:0};
-    const allVerts=(body.parts||[]).slice(1).flatMap(part=>part.vertices||[]);
-    let footprintWidth=0;
-    if(allVerts.length){
-      const maxY=Math.max(...allVerts.map(p=>p.y));
-      const bottom=allVerts.filter(p=>p.y>=maxY-1.0);
-      if(bottom.length) footprintWidth=Math.max(...bottom.map(p=>p.x))-Math.min(...bottom.map(p=>p.x));
-    }
-    body.plugin.debugPartCount=body.parts&&body.parts.length>1?body.parts.length-1:body.parts.length;
-    body.plugin.debugMass=body.mass;
-    body.plugin.debugInertia=body.inertia;
-    body.plugin.debugComOffsetX=comOffset.x;
-    body.plugin.debugComOffsetY=comOffset.y;
-    body.plugin.debugComOffset=Math.hypot(comOffset.x,comOffset.y);
-    body.plugin.debugFootprintWidth=footprintWidth;
-    body.plugin.debugAspectRatio=Math.max(w,h)/Math.max(1,Math.min(w,h));
+    const options={label:'piece',friction:0.55,frictionStatic:0.70,frictionAir:0.015,restitution:0,density:0.002,sleepThreshold:60,slop:0.05};
+    const rawRegions=shape&&Array.isArray(shape.regions)?shape.regions:[],regions=rawRegions.length?mergeRegionPolys(rawRegions):[],allTriangles=[];
+    let failed=false,failReason='NONE',failIteration=-1,remainingVertices=0;
+    for(const region of regions){const result=triangulateDetailed(region);if(result.diag.failed){failed=true;if(failReason==='NONE')failReason=result.diag.failReason||'REGION_TRIANGULATION_FAILED';failIteration=result.diag.failIteration;remainingVertices=result.diag.remainingVertices;continue;}allTriangles.push(...result.triangles);}
+    if(!regions.length&&shape&&shape.contour&&shape.contour.length>=3){const result=triangulateDetailed(shape.contour);if(result.diag.failed){failed=true;failReason=result.diag.failReason||'CONTOUR_TRIANGULATION_FAILED';failIteration=result.diag.failIteration;remainingVertices=result.diag.remainingVertices;}else allTriangles.push(...result.triangles);}
+    const convexPolys=allTriangles.length?convexDecompose(allTriangles):[];let body=null,fallback=false;
+    if(convexPolys.length){const parts=convexPolys.map(poly=>{const cx=poly.reduce((s,p)=>s+p.x,0)/poly.length,cy=poly.reduce((s,p)=>s+p.y,0)/poly.length;return Bodies.fromVertices(cx,cy,[poly],{...options,label:'piece-part'},false,0.001,0.001,0.001);});if(parts.length){body=Body.create({...options,parts:parts.slice()});const comLocal={x:body.position.x,y:body.position.y};body.plugin=body.plugin||{};body.plugin.imageVisualOffset={x:-comLocal.x,y:-comLocal.y};body.plugin.debugCompoundCOMLocal=comLocal;Body.setPosition(body,{x,y});}}
+    if(!body){body=Bodies.rectangle(x,y,Math.max(10,w),Math.max(10,h),options);fallback=true;body.plugin=body.plugin||{};body.plugin.imageVisualOffset={x:0,y:0};}
+    const areaTotal=allTriangles.reduce((s,t)=>s+Math.abs(area(t)),0),diag={inputCount:regions.reduce((s,r)=>s+r.length,0),cleanCount:regions.reduce((s,r)=>s+r.length,0),area:areaTotal,winding:'CCW',selfIntersection:false,selfIntersectionEdges:null,triangles:allTriangles.length,failed,failReason:failed?failReason:'NONE',failIteration,remainingVertices};
+    body.plugin=body.plugin||{};body.plugin.imageWidth=w;body.plugin.imageHeight=h;body.plugin.debugContours=shape&&shape.debugContours?shape.debugContours:[];body.plugin.debugContourVertexCount=shape&&shape.pointCount||0;body.plugin.debugTriangulatedCount=allTriangles.length;body.plugin.debugConvexPartCount=convexPolys.length;body.plugin.debugTriangulation=diag;body.plugin.debugFallback=fallback;body.plugin.debugShapeReady=!fallback&&allTriangles.length>0;body.plugin.debugBodyCreated=true;body.plugin.debugHoleCount=shape&&shape.holeCount||0;body.plugin.debugRegionCount=regions.length;body.plugin.debugRawRegionCount=rawRegions.length;body.plugin.debugPartCentroids=convexPolys.map(poly=>({x:poly.reduce((s,p)=>s+p.x,0)/poly.length,y:poly.reduce((s,p)=>s+p.y,0)/poly.length}));
+    const comOffset=body.plugin.imageVisualOffset||{x:0,y:0},allVerts=(body.parts||[]).slice(1).flatMap(part=>part.vertices||[]);let footprintWidth=0;if(allVerts.length){const maxY=Math.max(...allVerts.map(p=>p.y)),bottom=allVerts.filter(p=>p.y>=maxY-1);if(bottom.length)footprintWidth=Math.max(...bottom.map(p=>p.x))-Math.min(...bottom.map(p=>p.x));}
+    body.plugin.debugPartCount=body.parts&&body.parts.length>1?body.parts.length-1:body.parts.length;body.plugin.debugMass=body.mass;body.plugin.debugInertia=body.inertia;body.plugin.debugComOffsetX=comOffset.x;body.plugin.debugComOffsetY=comOffset.y;body.plugin.debugComOffset=Math.hypot(comOffset.x,comOffset.y);body.plugin.debugFootprintWidth=footprintWidth;body.plugin.debugAspectRatio=Math.max(w,h)/Math.max(1,Math.min(w,h));
     return body;
   }
-
   function add(body){World.add(world,body);}
-  function hold(body,x,y,angle=0){
-    Body.setStatic(body,true);
-    Body.setPosition(body,{x,y});
-    Body.setAngle(body,angle);
-    Body.setVelocity(body,{x:0,y:0});
-    Body.setAngularVelocity(body,0);
-    Sleeping.set(body,true);
-  }
-  function release(body){
-    Body.setStatic(body,false);
-    Sleeping.set(body,false);
-    body.plugin=body.plugin||{};
-    body.plugin.settleFrames=0;
-    body.plugin.releaseFrames=0;
-    // Do not inject an artificial downward velocity. Gravity alone starts
-    // the fall, which avoids an extra impulse at the moment of release.
-    Body.setVelocity(body,{x:0,y:0});
-    Body.setAngularVelocity(body,0);
-  }
-  function move(body,x,y){
-    Body.setPosition(body,{x,y});
-    Body.setVelocity(body,{x:0,y:0});
-    Body.setAngularVelocity(body,0);
-    body.plugin=body.plugin||{};
-    body.plugin.settleFrames=0;
-    body.plugin.releaseFrames=0;
-    Sleeping.set(body,true);
-  }
-  function rotate(body,delta){
-    Body.rotate(body,delta);
-    Body.setVelocity(body,{x:0,y:0});
-    Body.setAngularVelocity(body,0);
-    body.plugin=body.plugin||{};
-    body.plugin.settleFrames=0;
-    body.plugin.releaseFrames=0;
-    Sleeping.set(body,true);
-  }
+  function hold(body,x,y,angle=0){Body.setStatic(body,true);Body.setPosition(body,{x,y});Body.setAngle(body,angle);Body.setVelocity(body,{x:0,y:0});Body.setAngularVelocity(body,0);Sleeping.set(body,true);}
+  function release(body){Body.setStatic(body,false);Sleeping.set(body,false);body.plugin=body.plugin||{};body.plugin.settleFrames=0;body.plugin.releaseFrames=0;Body.setVelocity(body,{x:0,y:0});Body.setAngularVelocity(body,0);}
+  function move(body,x,y){Body.setPosition(body,{x,y});Body.setVelocity(body,{x:0,y:0});Body.setAngularVelocity(body,0);body.plugin=body.plugin||{};body.plugin.settleFrames=0;body.plugin.releaseFrames=0;Sleeping.set(body,true);}
+  function rotate(body,delta){Body.rotate(body,delta);Body.setVelocity(body,{x:0,y:0});Body.setAngularVelocity(body,0);body.plugin=body.plugin||{};body.plugin.settleFrames=0;body.plugin.releaseFrames=0;Sleeping.set(body,true);}
   function step(dt){
-    Engine.update(engine,Math.max(1,Math.min(33,dt*1000)));
-
-    // v22.5: keep the natural Matter.js sleep behaviour and only soften the
-    // first moments of an actual contact. v22.4 stopped bodies too early,
-    // which could freeze a piece in an unstable pose. Here we avoid forcing
-    // Sleep entirely; Matter.js can settle the body naturally.
+    const totalMs=Math.max(1,Math.min(33,dt*1000)),subDt=totalMs/SUB_STEPS;
+    for(let i=0;i<SUB_STEPS;i++)Engine.update(engine,subDt);
     const contactPieces=new Set();
-    for(const pair of engine.pairs.list){
-      if(!pair.isActive) continue;
-      const a=pair.bodyA&&pair.bodyA.parent?pair.bodyA.parent:pair.bodyA;
-      const b=pair.bodyB&&pair.bodyB.parent?pair.bodyB.parent:pair.bodyB;
-      if(a&&a.label==='piece'&&!a.isStatic) contactPieces.add(a);
-      if(b&&b.label==='piece'&&!b.isStatic) contactPieces.add(b);
-    }
-
+    for(const pair of engine.pairs.list){if(!pair.isActive)continue;const a=pair.bodyA&&pair.bodyA.parent?pair.bodyA.parent:pair.bodyA,b=pair.bodyB&&pair.bodyB.parent?pair.bodyB.parent:pair.bodyB;if(a&&a.label==='piece'&&!a.isStatic)contactPieces.add(a);if(b&&b.label==='piece'&&!b.isStatic)contactPieces.add(b);}
     for(const body of world.bodies){
-      if(body.isStatic || body.label!=='piece') continue;
-      body.plugin=body.plugin||{};
-      const inContact=contactPieces.has(body);
-
+      if(body.isStatic||body.label!=='piece')continue;
+      body.plugin=body.plugin||{};const inContact=contactPieces.has(body);
       if(inContact){
-        body.plugin.contactFrames=(body.plugin.contactFrames||0)+1;
-        body.plugin.releaseFrames=0;
-
-        const vx=body.velocity.x||0;
-        const vy=body.velocity.y||0;
-        const av=body.angularVelocity||0;
-        const f=body.plugin.contactFrames;
-
-        // Moderate impact damping. The first few frames absorb most of the
-        // collision energy, but never overwrite the angle or force Sleep.
-        const linearDamp=f<=6?0.38:0.78;
-        const angularDamp=f<=6?0.42:0.78;
-        const ny=vy>0?vy*linearDamp:vy*0.55;
-        Body.setVelocity(body,{x:vx*0.94,y:Math.abs(ny)<0.012?0:ny});
-        Body.setAngularVelocity(body,Math.abs(av*angularDamp)<0.0008?0:av*angularDamp);
+        body.plugin.contactFrames=(body.plugin.contactFrames||0)+1;body.plugin.releaseFrames=0;
+        const vx=body.velocity.x||0,vy=body.velocity.y||0,av=body.angularVelocity||0,f=body.plugin.contactFrames,linearDamp=f<=6?0.38:0.78,angularDamp=f<=6?0.42:0.78,ny=vy>0?vy*linearDamp:vy*0.55;
+        Body.setVelocity(body,{x:vx*0.94,y:Math.abs(ny)<0.012?0:ny});Body.setAngularVelocity(body,Math.abs(av*angularDamp)<0.0008?0:av*angularDamp);
       }else{
-        body.plugin.contactFrames=0;
-        body.plugin.releaseFrames=(body.plugin.releaseFrames||0)+1;
-
-        // Airborne pieces are intentionally not rotation-clamped.
-        // A small global cap prevents numerical runaway only in extreme cases.
-        if(!body.isSleeping){
-          const av=body.angularVelocity||0;
-          if(Math.abs(av)>0.35) Body.setAngularVelocity(body,av*0.98);
-        }else{
-          body.plugin.releaseFrames=0;
-        }
+        body.plugin.contactFrames=0;body.plugin.releaseFrames=(body.plugin.releaseFrames||0)+1;
+        if(!body.isSleeping){const av=body.angularVelocity||0;if(Math.abs(av)>0.35)Body.setAngularVelocity(body,av*0.98);}else body.plugin.releaseFrames=0;
       }
     }
   }
-
   return {engine,world,setup,createPieceBody,add,hold,release,move,rotate,step};
 })();
