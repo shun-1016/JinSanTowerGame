@@ -39,8 +39,8 @@
         vx: body.velocity.x,
         vy: body.velocity.y,
         av: body.angularVelocity,
-        wasGrounded: !!(body.plugin && body.plugin.v239LandingCorrection &&
-                        body.plugin.v239LandingCorrection.grounded)
+        wasGrounded: !!(body.plugin && body.plugin[pluginKey] &&
+                        body.plugin[pluginKey].grounded)
       });
     }
 
@@ -53,25 +53,21 @@
       const prev = before.get(body.id);
       const nowGrounded = groundContact(body);
       const prior = body.plugin[pluginKey] || {};
-      const firstContact = nowGrounded && !(prior.grounded || (prev && prev.wasGrounded));
+      const firstContact = nowGrounded &&
+        !(prior.grounded || (prev && prev.wasGrounded));
 
       if (firstContact && prev) {
         const falling = prev.vy > 1.0;
-        const nearlyStraight = Math.abs(prev.vx) < 0.35 && Math.abs(prev.av) < 0.015;
+        const nearlyStraight = Math.abs(prev.vx) < 0.35 &&
+          Math.abs(prev.av) < 0.015;
 
         if (falling && nearlyStraight) {
-          // Matter's collision solver can turn a zero-restitution impact into
-          // a small upward impulse. Remove only that newly generated bounce.
           if (body.velocity.y < 0) body.velocity.y = 0;
 
-          // The measured lateral impulse is collision-generated when the
-          // incoming vx is effectively zero. Remove it at the landing frame.
           if (Math.abs(body.velocity.x - prev.vx) > 0.35) {
             body.velocity.x = prev.vx;
           }
 
-          // Likewise, prevent an off-centre first contact from creating an
-          // initial spin when the piece entered with essentially no spin.
           if (Math.abs(body.angularVelocity - prev.av) > 0.015) {
             body.angularVelocity = prev.av;
           }
@@ -81,9 +77,9 @@
       body.plugin[pluginKey] = {
         grounded: nowGrounded,
         corrected: !!firstContact && !!prev &&
-                   prev.vy > 1.0 &&
-                   Math.abs(prev.vx) < 0.35 &&
-                   Math.abs(prev.av) < 0.015
+          prev.vy > 1.0 &&
+          Math.abs(prev.vx) < 0.35 &&
+          Math.abs(prev.av) < 0.015
       };
     }
   };
