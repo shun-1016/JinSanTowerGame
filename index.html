@@ -8,7 +8,6 @@
   <link rel="apple-touch-icon" href="assets/icon.png">
   <title>仁さんタワー</title>
   <link rel="stylesheet" href="style.css">
-
 <style>
 .measurementDebug{margin-top:14px;padding-top:14px;border-top:1px solid rgba(0,0,0,.12)}
 .measurementTitle{font-weight:700;margin-bottom:5px}
@@ -22,7 +21,7 @@
 <body>
   <header class="header">
     <h1>JinSan Tower Game</h1>
-    <div class="headerRight"><span id="version">v23.7</span><button id="endButton" class="endButton" type="button">終了</button></div>
+    <div class="headerRight"><span id="version">v23.8</span><button id="endButton" class="endButton" type="button">終了</button></div>
   </header>
   <main>
     <div class="stage">
@@ -33,10 +32,7 @@
           <div><span class="hudLabel">BEST</span><strong id="hudBest">—</strong></div>
           <div><span class="hudLabel">HEIGHT</span><strong id="hudHeight">0.0</strong><small>m</small></div>
         </div>
-        <div id="nextPanel" class="nextPanel">
-          <span class="nextLabel">NEXT</span>
-          <div class="nextPreview"><img id="nextPieceImage" alt="次のピース"></div>
-        </div>
+        <div id="nextPanel" class="nextPanel"><span class="nextLabel">NEXT</span><div class="nextPreview"><img id="nextPieceImage" alt="次のピース"></div></div>
       </div>
       <div id="status" class="status">読み込み中…</div>
       <div id="shapeDebug" class="shapeDebug hidden">輪郭解析: 待機中</div>
@@ -44,34 +40,22 @@
         <div class="modeCard">
           <h2>ゲームモード</h2>
           <p>遊び方を選択してください</p>
-          <button id="normalModeButton" class="modeButton normalModeButton" type="button">
-            <strong>通常モード</strong>
-            <span>土台の外へ落ちるとゲームオーバー</span>
-          </button>
-          <button id="endlessModeButton" class="modeButton endlessModeButton" type="button">
-            <strong>エンドレスモード</strong>
-            <span>左右の壁で落下を防ぎ、どこまでも積み上げる</span>
-          </button>
+          <button id="normalModeButton" class="modeButton normalModeButton" type="button"><strong>通常モード</strong><span>土台の外へ落ちるとゲームオーバー</span></button>
+          <button id="endlessModeButton" class="modeButton endlessModeButton" type="button"><strong>エンドレスモード</strong><span>左右の壁で落下を防ぎ、どこまでも積み上げる</span></button>
           <div id="measurementDebug" class="measurementDebug hidden">
             <div class="measurementTitle">物理挙動デバッグ</div>
-            <div id="measurementStatus" class="measurementStatus">v23.5の旧計測UI（v23.6計測UIに置き換え）</div>
-            <button id="measurementButton" class="modeButton measurementButton" type="button">
-              <strong>全ピース自動計測</strong>
-              <span>v23.5旧計測</span>
-            </button>
+            <div id="measurementStatus" class="measurementStatus">v23.8 計測待機中</div>
+            <button id="measurementButton" class="modeButton measurementButton" type="button"><strong>全ピース自動計測</strong><span>着地前後の衝突データを記録</span></button>
             <a id="measurementDownload" class="measurementDownload hidden" download>計測ZIPを保存</a>
           </div>
         </div>
       </div>
       <div id="resultScreen" class="resultScreen hidden">
         <div class="resultCard">
-          <h2>ゲームオーバー</h2>
-          <div id="newRecord" class="newRecord hidden">NEW RECORD!</div>
-          <p class="resultLabel">今回のスコア</p>
-          <div id="resultScore" class="resultScore">0</div>
+          <h2>ゲームオーバー</h2><div id="newRecord" class="newRecord hidden">NEW RECORD!</div>
+          <p class="resultLabel">今回のスコア</p><div id="resultScore" class="resultScore">0</div>
           <div class="resultStats"><span>高さ <strong id="resultHeight">0.0</strong>m</span><span>積み上げ <strong id="resultPieces">0</strong>個</span></div>
-          <p class="bestTitle">歴代ベスト3</p>
-          <ol id="bestScores" class="bestScores"></ol>
+          <p class="bestTitle">歴代ベスト3</p><ol id="bestScores" class="bestScores"></ol>
           <button id="restartButton" class="restartButton" type="button">もう一度遊ぶ</button>
         </div>
       </div>
@@ -84,12 +68,12 @@
   </main>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.20.0/matter.min.js"></script>
   <script src="js/physics.js"></script>
-  <script src="js/physics-v237.js"></script>
   <script src="js/piece.js"></script>
   <script src="js/renderer.js"></script>
   <script src="js/input.js"></script>
   <script src="js/game.js"></script>
   <script src="js/main.js"></script>
-  <script src="js/measurement-v236.js"></script>
+  <script src="js/physics-v238.js"></script>
+  <script src="js/measurement-v238.js"></script>
 </body>
 </html>
