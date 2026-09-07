@@ -1,8 +1,8 @@
-/* v1.24.2 - single physics-step measurement integration */
+/* v1.25.0 - single physics-step measurement integration */
 (() => {
   'use strict';
 
-  const VERSION = 'v1.24.2';
+  const VERSION = 'v1.25.0';
   const ASSET_PREFIX = 'assets/';
   const MAX_DISCOVERY = 999;
   const POST_LAND_FRAMES = 60;

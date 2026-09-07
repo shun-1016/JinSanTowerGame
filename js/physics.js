@@ -123,20 +123,6 @@ const Physics = (() => {
   function step(dt){
     const totalMs=Math.max(1,Math.min(33,dt*1000)),subDt=totalMs/SUB_STEPS;
     for(let i=0;i<SUB_STEPS;i++)Engine.update(engine,subDt);
-    const contactPieces=new Set();
-    for(const pair of engine.pairs.list){if(!pair.isActive)continue;const a=pair.bodyA&&pair.bodyA.parent?pair.bodyA.parent:pair.bodyA,b=pair.bodyB&&pair.bodyB.parent?pair.bodyB.parent:pair.bodyB;if(a&&a.label==='piece'&&!a.isStatic)contactPieces.add(a);if(b&&b.label==='piece'&&!b.isStatic)contactPieces.add(b);}
-    for(const body of world.bodies){
-      if(body.isStatic||body.label!=='piece')continue;
-      body.plugin=body.plugin||{};const inContact=contactPieces.has(body);
-      if(inContact){
-        body.plugin.contactFrames=(body.plugin.contactFrames||0)+1;body.plugin.releaseFrames=0;
-        const vx=body.velocity.x||0,vy=body.velocity.y||0,av=body.angularVelocity||0,f=body.plugin.contactFrames,linearDamp=f<=6?0.38:0.78,angularDamp=f<=6?0.42:0.78,ny=vy>0?vy*linearDamp:vy*0.55;
-        Body.setVelocity(body,{x:vx*0.94,y:Math.abs(ny)<0.012?0:ny});Body.setAngularVelocity(body,Math.abs(av*angularDamp)<0.0008?0:av*angularDamp);
-      }else{
-        body.plugin.contactFrames=0;body.plugin.releaseFrames=(body.plugin.releaseFrames||0)+1;
-        if(!body.isSleeping){const av=body.angularVelocity||0;if(Math.abs(av)>0.35)Body.setAngularVelocity(body,av*0.98);}else body.plugin.releaseFrames=0;
-      }
-    }
   }
   return {engine,world,setup,createPieceBody,add,hold,release,move,rotate,step};
 })();
