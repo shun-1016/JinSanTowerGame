@@ -1,8 +1,8 @@
-/* v1.25.0 - single physics-step measurement integration */
+/* v1.25.1 - single physics-step measurement integration / split summary output */
 (() => {
   'use strict';
 
-  const VERSION = 'v1.25.0';
+  const VERSION = 'v1.25.1';
   const ASSET_PREFIX = 'assets/';
   const MAX_DISCOVERY = 999;
   const POST_LAND_FRAMES = 60;
@@ -213,7 +213,7 @@
     Game.__measurementV1241Installed=true;
   }
 
-  function csvLine(values){ return values.map(v=>{ const s=String(v??''); return /[,"\r\n]/.test(s)?`"${s.replace(/"/g,'""')}"`:s; }).join(','); }
+  function csvLine(values){ return values.map(v=>{ const s=String(v??''); return /[,\"\r\n]/.test(s)?`"${s.replace(/"/g,'""')}"`:s; }).join(','); }
   function makeCsv(header,rows){ return '\ufeff'+header.join(',')+'\n'+rows.map(r=>csvLine(r)).join('\n')+'\n'; }
 
   function metadataRows(){
@@ -251,15 +251,45 @@
     const meta=metadataRows();
     const files=[
       {name:'metadata.csv',content:makeCsv(meta.h,meta.rows)},
-      {name:'summary.csv',content:makeCsv(summaryHeader,state.summaries)},
       {name:'validation.csv',content:makeCsv(validationHeader,validationRows())}
     ];
-    const by=new Map(); for(const r of state.allRows){ const p=Number(r.split(',')[0]); if(!by.has(p))by.set(p,[]);by.get(p).push(r); }
+
+    // Split summary output into chunks of at most 10 pieces.
+    // The number of chunks and their end piece are derived from the detected
+    // piece count, so this remains valid when new pieces are added later.
+    const summariesByPiece=new Map();
+    for(const row of state.summaries){
+      const piece=Number(row[1]);
+      if(!Number.isInteger(piece)||piece<1) continue;
+      if(!summariesByPiece.has(piece)) summariesByPiece.set(piece,[]);
+      summariesByPiece.get(piece).push(row);
+    }
+    for(let start=1; start<=state.images.length; start+=10){
+      const end=Math.min(start+9,state.images.length);
+      const rows=[];
+      for(let piece=start; piece<=end; piece++){
+        rows.push(...(summariesByPiece.get(piece)||[]));
+      }
+      files.push({
+        name:`summary_${pad2(start)}-${pad2(end)}.csv`,
+        content:makeCsv(summaryHeader,rows)
+      });
+    }
+
+    const by=new Map();
+    for(const r of state.allRows){ const p=Number(r.split(',')[0]); if(!by.has(p))by.set(p,[]);by.get(p).push(r); }
     const runFolder=`run${state.run}`;
-    for(let i=1;i<=state.images.length;i++) files.push({name:`${runFolder}/${pad2(i)}.csv`,content:'\ufeff'+csvHeader.join(',')+'\n'+(by.get(i)||[]).map(r=>r.split(',').map(v=>`"${String(v).replace(/"/g,'""')}"`).join(',')).join('\n')+'\n'});
-    files[0].name=`${runFolder}/metadata.csv`;
-    files[1].name=`${runFolder}/summary.csv`;
-    files[2].name=`${runFolder}/validation.csv`;
+    for(let i=1;i<=state.images.length;i++) files.push({
+      name:`${runFolder}/${pad2(i)}.csv`,
+      content:'\ufeff'+csvHeader.join(',')+'\n'+(by.get(i)||[]).map(r=>r.split(',').map(v=>`"${String(v).replace(/"/g,'""')}"`).join(',')).join('\n')+'\n'
+    });
+
+    // Keep metadata / validation / split summary inside the Run folder.
+    for(const f of files.slice(0,2)) f.name=`${runFolder}/${f.name}`;
+    for(let i=2;i<files.length;i++){
+      if(!files[i].name.startsWith(`${runFolder}/`)) files[i].name=`${runFolder}/${files[i].name}`;
+    }
+
     const blob=zip(files),url=URL.createObjectURL(blob),a=$('measurementDownload');
     if(a){
       a.href=url;
