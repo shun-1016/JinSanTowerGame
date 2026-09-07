@@ -1,9 +1,0 @@
---- a/js/physics.js
-+++ b/js/physics.js
-@@
--/* v1.25.0 - exact-alpha physics with 4x sub-step experiment */
-+/* v1.26.0 - exact-alpha physics with 8x sub-step experiment */
- const Physics = (() => {
-   const {Engine,World,Bodies,Body,Sleeping}=Matter;
--  const SUB_STEPS=4;
-+  const SUB_STEPS=8;
