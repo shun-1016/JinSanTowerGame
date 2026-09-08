@@ -1,8 +1,8 @@
-/* v1.28.0 - single physics-step measurement integration / per-contact landing diagnostics */
+/* v1.29.0 - measurement schema cleanup / per-contact landing diagnostics */
 (() => {
   'use strict';
 
-  const VERSION = 'v1.28.0';
+  const VERSION = 'v1.29.0';
   const ASSET_PREFIX = 'assets/';
   const MAX_DISCOVERY = 999;
   const POST_LAND_FRAMES = 60;
@@ -25,15 +25,17 @@
     'contact_normal_angle_rad','contact_torque_proxy','contact_com_distance_px','contact_asymmetry_px'
   ];
 
+  // Summary is intentionally compact: derived/redundant contact metrics are omitted,
+  // while landing pre-state and per-contact diagnostics are retained for analysis.
   const summaryHeader = [
     'run','piece','status','frame_count','landing_frame','post_land_frame_count',
-    'mass','inertia','com_offset_px','footprint_width_px','contact_width_px','contact_center_offset_px','contact_points','contact_parts',
+    'mass','inertia','com_offset_px','footprint_width_px','contact_points','contact_parts',
+    'landing_angle','landing_pre_vx','landing_pre_vy','landing_pre_angular_velocity',
     'landing_vx','landing_vy','landing_angular_velocity','landing_delta_vx','landing_delta_vy','landing_delta_angular_velocity',
     'max_post_land_abs_vx','max_post_land_abs_vy','max_post_land_abs_angular_velocity','post_land_x_range','post_land_y_range','post_land_angle_range',
     'max_bounce_height_px','sleep_frame','final_sleeping','final_ground_contact',
     'physics_parts','triangles','regions','raw_regions','contour_vertices',
-    'landing_contact_left_offset_px','landing_contact_right_offset_px','landing_contact_span_from_com_px',
-    'landing_contact_normal_angle_rad','landing_contact_torque_proxy','landing_contact_com_distance_px','landing_contact_asymmetry_px',
+    'landing_contact_left_offset_px','landing_contact_right_offset_px','landing_contact_normal_angle_rad','landing_contact_torque_proxy',
     'landing_contact_parts_detail','landing_contact_offsets_xy_px','landing_contact_torque_proxies'
   ];
 
@@ -196,14 +198,14 @@
     state.summaries.push([
       state.run,state.index+1,status,arr.length,state.landingFrame===null?'':state.landingFrame,state.landingFrame===null?0:Math.max(0,arr.length-state.landingFrame-1),
       Number(firstDiag[colIndex('mass')]),Number(firstDiag[colIndex('inertia')]),Number(firstDiag[colIndex('com_offset_px')]),Number(firstDiag[colIndex('footprint_width_px')]),
-      Number(land?.[colIndex('contact_width_px')]),Number(land?.[colIndex('contact_center_offset_px')]),Number(land?.[colIndex('contact_points')]),Number(land?.[colIndex('contact_parts')]),
+      Number(land?.[colIndex('contact_points')]),Number(land?.[colIndex('contact_parts')]),
+      Number(land?.[colIndex('angle')]),Number(land?.[colIndex('pre_velocity_x')]),Number(land?.[colIndex('pre_velocity_y')]),Number(land?.[colIndex('pre_angular_velocity')]),
       Number(land?.[colIndex('velocity_x')]),Number(land?.[colIndex('velocity_y')]),Number(land?.[colIndex('angular_velocity')]),Number(land?.[colIndex('delta_velocity_x')]),Number(land?.[colIndex('delta_velocity_y')]),Number(land?.[colIndex('delta_angular_velocity')]),
       vxs.length?Math.max(...vxs.map(Math.abs)):NaN,vys.length?Math.max(...vys.map(Math.abs)):NaN,avs.length?Math.max(...avs.map(Math.abs)):NaN,
       xs.length?Math.max(...xs)-Math.min(...xs):NaN,ys.length?Math.max(...ys)-Math.min(...ys):NaN,angs.length?Math.max(...angs)-Math.min(...angs):NaN,
       maxBounce,sleepFrame,last[colIndex('sleeping')]==='1'?1:0,last[colIndex('ground_contact')]==='1'?1:0,
-      Number(firstDiag[colIndex('physics_parts')]),Number(firstDiag[colIndex('triangles')]),Number(firstDiag[colIndex('regions')]),Number(firstDiag[colIndex('raw_regions')]),Number(firstDiag[colIndex('contour_vertices')])
-      ,Number(land?.[colIndex('contact_left_offset_px')]),Number(land?.[colIndex('contact_right_offset_px')]),Number(land?.[colIndex('contact_span_from_com_px')])
-      ,Number(land?.[colIndex('contact_normal_angle_rad')]),Number(land?.[colIndex('contact_torque_proxy')]),Number(land?.[colIndex('contact_com_distance_px')]),Number(land?.[colIndex('contact_asymmetry_px')]),
+      Number(firstDiag[colIndex('physics_parts')]),Number(firstDiag[colIndex('triangles')]),Number(firstDiag[colIndex('regions')]),Number(firstDiag[colIndex('raw_regions')]),Number(firstDiag[colIndex('contour_vertices')]),
+      Number(land?.[colIndex('contact_left_offset_px')]),Number(land?.[colIndex('contact_right_offset_px')]),Number(land?.[colIndex('contact_normal_angle_rad')]),Number(land?.[colIndex('contact_torque_proxy')]),
       (state.landingContactDetail||[]).map(c=>String(c.partId)).join(';'),
       (state.landingContactDetail||[]).map(c=>`${num(c.x)}:${num(c.y)}`).join(';'),
       (state.landingContactDetail||[]).map(c=>num(c.torque,6)).join(';')
@@ -400,6 +402,11 @@
     clean.addEventListener('click',start);
     installGameLoopHooks();
     state.images=await discoverImages();
+    const debug=$('measurementDebug');
+    if(debug){
+      debug.style.fontFamily='inherit';
+      debug.querySelectorAll('*').forEach(el=>{ el.style.fontFamily='inherit'; });
+    }
     const title=document.querySelector('.measurementTitle'); if(title) title.textContent=`物理挙動デバッグ ${VERSION}`;
     const status=$('measurementStatus'); if(status) status.textContent=`${state.images.length}ピース検出。着地接触点・Physics Part診断を計測できます。`;
     const span=clean.querySelector('span'); if(span) span.textContent='着地前後の衝突データを記録';
