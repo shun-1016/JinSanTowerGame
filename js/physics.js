@@ -1,75 +1,34 @@
-/* v1.25.0 - exact-alpha physics with 4x sub-step experiment */
+/* v1.30.0 - exact-alpha geometry / optimized convex-part merge experiment */
 const Physics = (() => {
   const {Engine,World,Bodies,Body,Sleeping}=Matter;
   const SUB_STEPS=4;
-  const engine=Engine.create({
-    enableSleeping:true,
-    positionIterations:12,
-    velocityIterations:8,
-    constraintIterations:2
-  });
+  const engine=Engine.create({enableSleeping:true,positionIterations:12,velocityIterations:8,constraintIterations:2});
   engine.gravity.x=0;engine.gravity.y=1;engine.gravity.scale=0.001;
-  const world=engine.world;
-  let ground=null,sideWalls=[];
+  const world=engine.world; let ground=null,sideWalls=[];
 
   function setup(width,groundY,baseWidth=width,isEndless=false){
     if(ground) World.remove(world,ground);
     if(sideWalls.length){World.remove(world,sideWalls);sideWalls=[];}
     const bw=Math.max(100,baseWidth),left=(width-bw)/2,right=left+bw;
-    ground=Bodies.rectangle((left+right)/2,groundY+14,bw,28,{
-      isStatic:true,label:'ground',friction:0.85,frictionStatic:1,restitution:0
-    });
+    ground=Bodies.rectangle((left+right)/2,groundY+14,bw,28,{isStatic:true,label:'ground',friction:0.85,frictionStatic:1,restitution:0});
     World.add(world,ground);
-    if(isEndless){
-      const wallH=2000;
-      sideWalls=[
-        Bodies.rectangle(left-14,groundY-wallH/2,28,wallH,{isStatic:true,label:'side-wall',friction:0.8,frictionStatic:1,restitution:0}),
-        Bodies.rectangle(right+14,groundY-wallH/2,28,wallH,{isStatic:true,label:'side-wall',friction:0.8,frictionStatic:1,restitution:0})
-      ];
-      World.add(world,sideWalls);
-    }
+    if(isEndless){const wallH=2000;sideWalls=[Bodies.rectangle(left-14,groundY-wallH/2,28,wallH,{isStatic:true,label:'side-wall',friction:0.8,frictionStatic:1,restitution:0}),Bodies.rectangle(right+14,groundY-wallH/2,28,wallH,{isStatic:true,label:'side-wall',friction:0.8,frictionStatic:1,restitution:0})];World.add(world,sideWalls);}
   }
-
   function cross(a,b,c){return (b.x-a.x)*(c.y-a.y)-(b.y-a.y)*(c.x-a.x);}
   function area(poly){let a=0;for(let i=0;i<poly.length;i++){const p=poly[i],q=poly[(i+1)%poly.length];a+=p.x*q.y-q.x*p.y;}return a/2;}
   function pointInTriangle(p,a,b,c){const c1=cross(a,b,p),c2=cross(b,c,p),c3=cross(c,a,p),eps=1e-8;return !((c1<-eps||c2<-eps||c3<-eps)&&(c1>eps||c2>eps||c3>eps));}
   function samePoint(a,b){return Math.hypot(a.x-b.x,a.y-b.y)<1e-6;}
-  function segmentsIntersect(a,b,c,d){
-    const ab1=cross(a,b,c),ab2=cross(a,b,d),cd1=cross(c,d,a),cd2=cross(c,d,b),eps=1e-9;
-    const on=(p,q,r)=>Math.abs(cross(p,q,r))<=eps&&p.x>=Math.min(q.x,r.x)-eps&&p.x<=Math.max(q.x,r.x)+eps&&p.y>=Math.min(q.y,r.y)-eps&&p.y<=Math.max(q.y,r.y)+eps;
-    if((ab1>eps&&ab2<-eps||ab1<-eps&&ab2>eps)&&(cd1>eps&&cd2<-eps||cd1<-eps&&cd2>eps))return true;
-    return on(c,a,b)||on(d,a,b)||on(a,c,d)||on(b,c,d);
-  }
-  function hasSelfIntersection(poly){
-    for(let i=0;i<poly.length;i++){const a=poly[i],b=poly[(i+1)%poly.length];for(let j=i+1;j<poly.length;j++){if(j===i||(j+1)%poly.length===i||(i+1)%poly.length===j)continue;if(segmentsIntersect(a,b,poly[j],poly[(j+1)%poly.length]))return {yes:true,edgeA:i,edgeB:j};}}
-    return {yes:false,edgeA:-1,edgeB:-1};
-  }
+  function segmentsIntersect(a,b,c,d){const ab1=cross(a,b,c),ab2=cross(a,b,d),cd1=cross(c,d,a),cd2=cross(c,d,b),eps=1e-9;const on=(p,q,r)=>Math.abs(cross(p,q,r))<=eps&&p.x>=Math.min(q.x,r.x)-eps&&p.x<=Math.max(q.x,r.x)+eps&&p.y>=Math.min(q.y,r.y)-eps&&p.y<=Math.max(q.y,r.y)+eps;if((ab1>eps&&ab2<-eps||ab1<-eps&&ab2>eps)&&(cd1>eps&&cd2<-eps||cd1<-eps&&cd2>eps))return true;return on(c,a,b)||on(d,a,b)||on(a,c,d)||on(b,c,d);}
+  function hasSelfIntersection(poly){for(let i=0;i<poly.length;i++){const a=poly[i],b=poly[(i+1)%poly.length];for(let j=i+1;j<poly.length;j++){if(j===i||(j+1)%poly.length===i||(i+1)%poly.length===j)continue;if(segmentsIntersect(a,b,poly[j],poly[(j+1)%poly.length]))return {yes:true,edgeA:i,edgeB:j};}}return {yes:false,edgeA:-1,edgeB:-1};}
   function triangulateDetailed(input){
     const diag={inputCount:input?input.length:0,cleanCount:0,area:0,winding:'-',selfIntersection:false,selfIntersectionEdges:null,triangles:0,failed:false,failReason:'NONE',failIteration:-1,remainingVertices:0};
     if(!input||input.length<3){diag.failed=true;diag.failReason='TOO_FEW_POINTS';return {triangles:[],diag};}
-    const poly=[];for(const p of input){if(!poly.length||!samePoint(poly[poly.length-1],p))poly.push({x:p.x,y:p.y});}
-    if(poly.length>=2&&samePoint(poly[0],poly[poly.length-1]))poly.pop();
+    const poly=[];for(const p of input){if(!poly.length||!samePoint(poly[poly.length-1],p))poly.push({x:p.x,y:p.y});}if(poly.length>=2&&samePoint(poly[0],poly[poly.length-1]))poly.pop();
     diag.cleanCount=poly.length;if(poly.length<3){diag.failed=true;diag.failReason='TOO_FEW_CLEAN_POINTS';return {triangles:[],diag};}
-    diag.area=area(poly);diag.winding=diag.area>0?'CCW':diag.area<0?'CW':'ZERO';
-    const si=hasSelfIntersection(poly);diag.selfIntersection=si.yes;diag.selfIntersectionEdges=si.yes?`${si.edgeA}/${si.edgeB}`:null;
-    if(Math.abs(diag.area)<0.05){diag.failed=true;diag.failReason='ZERO_AREA';return {triangles:[],diag};}
-    if(diag.area<0){poly.reverse();diag.area=-diag.area;diag.winding='CCW';}
-    const indices=poly.map((_,i)=>i),triangles=[];let guard=0;
-    while(indices.length>3){
-      if(guard++>poly.length*poly.length*4){diag.failed=true;diag.failReason='GUARD_LIMIT';diag.failIteration=guard;diag.remainingVertices=indices.length;return {triangles:[],diag};}
-      let earFound=false;
-      for(let i=0;i<indices.length;i++){
-        const ia=indices[(i-1+indices.length)%indices.length],ib=indices[i],ic=indices[(i+1)%indices.length],a=poly[ia],b=poly[ib],c=poly[ic];
-        if(cross(a,b,c)<=1e-7)continue;
-        let contains=false;for(const id of indices){if(id===ia||id===ib||id===ic)continue;if(pointInTriangle(poly[id],a,b,c)){contains=true;break;}}
-        if(contains)continue;triangles.push([a,b,c]);indices.splice(i,1);earFound=true;break;
-      }
-      if(!earFound){diag.failed=true;diag.failReason='NO_EAR_FOUND';diag.failIteration=guard;diag.remainingVertices=indices.length;return {triangles:[],diag};}
-    }
-    if(indices.length===3)triangles.push([poly[indices[0]],poly[indices[1]],poly[indices[2]]]);
-    const valid=triangles.filter(t=>Math.abs(area(t))>0.05);diag.triangles=valid.length;
-    if(valid.length!==triangles.length){diag.failed=true;diag.failReason='DEGENERATE_TRIANGLE';diag.remainingVertices=indices.length;return {triangles:[],diag};}
-    return {triangles:valid,diag};
+    diag.area=area(poly);diag.winding=diag.area>0?'CCW':diag.area<0?'CW':'ZERO';const si=hasSelfIntersection(poly);diag.selfIntersection=si.yes;diag.selfIntersectionEdges=si.yes?`${si.edgeA}/${si.edgeB}`:null;
+    if(Math.abs(diag.area)<0.05){diag.failed=true;diag.failReason='ZERO_AREA';return {triangles:[],diag};}if(diag.area<0){poly.reverse();diag.area=-diag.area;diag.winding='CCW';}
+    const indices=poly.map((_,i)=>i),triangles=[];let guard=0;while(indices.length>3){if(guard++>poly.length*poly.length*4){diag.failed=true;diag.failReason='GUARD_LIMIT';diag.failIteration=guard;diag.remainingVertices=indices.length;return {triangles:[],diag};}let earFound=false;for(let i=0;i<indices.length;i++){const ia=indices[(i-1+indices.length)%indices.length],ib=indices[i],ic=indices[(i+1)%indices.length],a=poly[ia],b=poly[ib],c=poly[ic];if(cross(a,b,c)<=1e-7)continue;let contains=false;for(const id of indices){if(id===ia||id===ib||id===ic)continue;if(pointInTriangle(poly[id],a,b,c)){contains=true;break;}}if(contains)continue;triangles.push([a,b,c]);indices.splice(i,1);earFound=true;break;}if(!earFound){diag.failed=true;diag.failReason='NO_EAR_FOUND';diag.failIteration=guard;diag.remainingVertices=indices.length;return {triangles:[],diag};}}
+    if(indices.length===3)triangles.push([poly[indices[0]],poly[indices[1]],poly[indices[2]]]);const valid=triangles.filter(t=>Math.abs(area(t))>0.05);diag.triangles=valid.length;if(valid.length!==triangles.length){diag.failed=true;diag.failReason='DEGENERATE_TRIANGLE';diag.remainingVertices=indices.length;return {triangles:[],diag};}return {triangles:valid,diag};
   }
   function samePointExact(a,b){return Math.abs(a.x-b.x)<1e-6&&Math.abs(a.y-b.y)<1e-6;}
   function simplifyPolygonCollinear(poly){if(poly.length<4)return poly.slice();const out=[];for(let i=0;i<poly.length;i++){const a=poly[(i-1+poly.length)%poly.length],b=poly[i],c=poly[(i+1)%poly.length];if(Math.abs(cross(a,b,c))>1e-7)out.push(b);}return out;}
@@ -77,52 +36,53 @@ const Physics = (() => {
   function mergeTwoConvexPolys(a,b){
     const edges=[];const addEdge=(p,q)=>{for(let i=0;i<edges.length;i++){if(samePointExact(edges[i][0],q)&&samePointExact(edges[i][1],p)){edges.splice(i,1);return;}}edges.push([p,q]);};
     for(let i=0;i<a.length;i++)addEdge(a[i],a[(i+1)%a.length]);for(let i=0;i<b.length;i++)addEdge(b[i],b[(i+1)%b.length]);if(edges.length<3)return null;
-    const outgoing=new Map(),key=p=>`${p.x},${p.y}`;for(const e of edges){const k=key(e[0]);if(!outgoing.has(k))outgoing.set(k,[]);outgoing.get(k).push(e);}
-    const start=edges[0][0],poly=[start];let cur=edges[0][1];edges.splice(0,1);let guard=0;
+    const outgoing=new Map(),key=p=>`${p.x},${p.y}`;for(const e of edges){const k=key(e[0]);if(!outgoing.has(k))outgoing.set(k,[]);outgoing.get(k).push(e);}const start=edges[0][0],poly=[start];let cur=edges[0][1];edges.splice(0,1);let guard=0;
     while(!samePointExact(cur,start)&&guard++<edges.length+5){poly.push(cur);const list=outgoing.get(key(cur))||[];const e=list.find(e=>edges.includes(e));if(!e)return null;edges.splice(edges.indexOf(e),1);cur=e[1];}
-    if(!samePointExact(cur,start)||poly.length<3||edges.length)return null;
-    const clean=simplifyPolygonCollinear(poly);if(clean.length<3)return null;if(area(clean)<0)clean.reverse();if(Math.abs(area(clean))<0.05||!isConvex(clean))return null;return clean;
+    if(!samePointExact(cur,start)||poly.length<3||edges.length)return null;const clean=simplifyPolygonCollinear(poly);if(clean.length<3)return null;if(area(clean)<0)clean.reverse();if(Math.abs(area(clean))<0.05||!isConvex(clean))return null;return clean;
   }
-  function convexDecompose(triangles){
+
+  // v1.30.0: preserve exact opaque coverage, but choose convex merges globally
+  // rather than relying on the previous first-match greedy merge order.
+  // Only unions that remain convex are accepted, so no transparent pixels are filled.
+  function convexDecomposeOptimized(triangles){
     let polys=triangles.map(t=>t.map(p=>({x:p.x,y:p.y}))),changed=true;
-    while(changed){changed=false;outer:for(let i=0;i<polys.length;i++)for(let j=i+1;j<polys.length;j++){
-      let shared=false;for(let ai=0;ai<polys[i].length&&!shared;ai++){const a1=polys[i][ai],a2=polys[i][(ai+1)%polys[i].length];for(let bj=0;bj<polys[j].length;bj++){if(samePointExact(a1,polys[j][(bj+1)%polys[j].length])&&samePointExact(a2,polys[j][bj])){shared=true;break;}}}
-      if(!shared)continue;const merged=mergeTwoConvexPolys(polys[i],polys[j]);if(merged){polys[i]=merged;polys.splice(j,1);changed=true;break outer;}
-    }}
+    while(changed){
+      changed=false;let best=null;
+      for(let i=0;i<polys.length;i++)for(let j=i+1;j<polys.length;j++){
+        const a=polys[i],b=polys[j];let shared=false;
+        for(let ai=0;ai<a.length&&!shared;ai++){const a1=a[ai],a2=a[(ai+1)%a.length];for(let bj=0;bj<b.length;bj++){if(samePointExact(a1,b[(bj+1)%b.length])&&samePointExact(a2,b[bj])){shared=true;break;}}}
+        if(!shared)continue;
+        const merged=mergeTwoConvexPolys(a,b);if(!merged)continue;
+        const perimeter=merged.reduce((sum,p,i)=>sum+Math.hypot(p.x-merged[(i+1)%merged.length].x,p.y-merged[(i+1)%merged.length].y),0);
+        const score=merged.length*100000 + perimeter;
+        if(!best||score<best.score)best={i,j,merged,score};
+      }
+      if(best){polys[best.i]=best.merged;polys.splice(best.j,1);changed=true;}
+    }
     return polys;
   }
+
   function mergeRegionPolys(regions){
-    let polys=regions.map(r=>r.map(p=>({x:p.x,y:p.y}))),changed=true;
-    while(changed){changed=false;outer:for(let i=0;i<polys.length;i++)for(let j=i+1;j<polys.length;j++){
-      const a=polys[i],b=polys[j];let shared=false;
-      for(let ai=0;ai<a.length&&!shared;ai++){const a1=a[ai],a2=a[(ai+1)%a.length];for(let bj=0;bj<b.length;bj++){if(samePointExact(a1,b[(bj+1)%b.length])&&samePointExact(a2,b[bj])){shared=true;break;}}}
-      if(!shared)continue;const merged=mergeTwoConvexPolys(a,b);if(!merged)continue;polys[i]=merged;polys.splice(j,1);changed=true;break outer;
-    }}
-    return polys;
+    let polys=regions.map(r=>r.map(p=>({x:p.x,y:p.y}))),changed=true;while(changed){changed=false;outer:for(let i=0;i<polys.length;i++)for(let j=i+1;j<polys.length;j++){const a=polys[i],b=polys[j];let shared=false;for(let ai=0;ai<a.length&&!shared;ai++){const a1=a[ai],a2=a[(ai+1)%a.length];for(let bj=0;bj<b.length;bj++){if(samePointExact(a1,b[(bj+1)%b.length])&&samePointExact(a2,b[bj])){shared=true;break;}}}if(!shared)continue;const merged=mergeTwoConvexPolys(a,b);if(!merged)continue;polys[i]=merged;polys.splice(j,1);changed=true;break outer;}}return polys;
   }
   function createPieceBody(x,y,w,h,shape){
     const options={label:'piece',friction:0.55,frictionStatic:0.70,frictionAir:0.015,restitution:0,density:0.002,sleepThreshold:60,slop:0.05};
-    const rawRegions=shape&&Array.isArray(shape.regions)?shape.regions:[],regions=rawRegions.length?mergeRegionPolys(rawRegions):[],allTriangles=[];
-    let failed=false,failReason='NONE',failIteration=-1,remainingVertices=0;
+    const rawRegions=shape&&Array.isArray(shape.regions)?shape.regions:[],regions=rawRegions.length?mergeRegionPolys(rawRegions):[],allTriangles=[];let failed=false,failReason='NONE',failIteration=-1,remainingVertices=0;
     for(const region of regions){const result=triangulateDetailed(region);if(result.diag.failed){failed=true;if(failReason==='NONE')failReason=result.diag.failReason||'REGION_TRIANGULATION_FAILED';failIteration=result.diag.failIteration;remainingVertices=result.diag.remainingVertices;continue;}allTriangles.push(...result.triangles);}
     if(!regions.length&&shape&&shape.contour&&shape.contour.length>=3){const result=triangulateDetailed(shape.contour);if(result.diag.failed){failed=true;failReason=result.diag.failReason||'CONTOUR_TRIANGULATION_FAILED';failIteration=result.diag.failIteration;remainingVertices=result.diag.remainingVertices;}else allTriangles.push(...result.triangles);}
-    const convexPolys=allTriangles.length?convexDecompose(allTriangles):[];let body=null,fallback=false;
+    const convexPolys=allTriangles.length?convexDecomposeOptimized(allTriangles):[];let body=null,fallback=false;
     if(convexPolys.length){const parts=convexPolys.map(poly=>{const cx=poly.reduce((s,p)=>s+p.x,0)/poly.length,cy=poly.reduce((s,p)=>s+p.y,0)/poly.length;return Bodies.fromVertices(cx,cy,[poly],{...options,label:'piece-part'},false,0.001,0.001,0.001);});if(parts.length){body=Body.create({...options,parts:parts.slice()});const comLocal={x:body.position.x,y:body.position.y};body.plugin=body.plugin||{};body.plugin.imageVisualOffset={x:-comLocal.x,y:-comLocal.y};body.plugin.debugCompoundCOMLocal=comLocal;Body.setPosition(body,{x,y});}}
     if(!body){body=Bodies.rectangle(x,y,Math.max(10,w),Math.max(10,h),options);fallback=true;body.plugin=body.plugin||{};body.plugin.imageVisualOffset={x:0,y:0};}
     const areaTotal=allTriangles.reduce((s,t)=>s+Math.abs(area(t)),0),diag={inputCount:regions.reduce((s,r)=>s+r.length,0),cleanCount:regions.reduce((s,r)=>s+r.length,0),area:areaTotal,winding:'CCW',selfIntersection:false,selfIntersectionEdges:null,triangles:allTriangles.length,failed,failReason:failed?failReason:'NONE',failIteration,remainingVertices};
     body.plugin=body.plugin||{};body.plugin.imageWidth=w;body.plugin.imageHeight=h;body.plugin.debugContours=shape&&shape.debugContours?shape.debugContours:[];body.plugin.debugContourVertexCount=shape&&shape.pointCount||0;body.plugin.debugTriangulatedCount=allTriangles.length;body.plugin.debugConvexPartCount=convexPolys.length;body.plugin.debugTriangulation=diag;body.plugin.debugFallback=fallback;body.plugin.debugShapeReady=!fallback&&allTriangles.length>0;body.plugin.debugBodyCreated=true;body.plugin.debugHoleCount=shape&&shape.holeCount||0;body.plugin.debugRegionCount=regions.length;body.plugin.debugRawRegionCount=rawRegions.length;body.plugin.debugPartCentroids=convexPolys.map(poly=>({x:poly.reduce((s,p)=>s+p.x,0)/poly.length,y:poly.reduce((s,p)=>s+p.y,0)/poly.length}));
     const comOffset=body.plugin.imageVisualOffset||{x:0,y:0},allVerts=(body.parts||[]).slice(1).flatMap(part=>part.vertices||[]);let footprintWidth=0;if(allVerts.length){const maxY=Math.max(...allVerts.map(p=>p.y)),bottom=allVerts.filter(p=>p.y>=maxY-1);if(bottom.length)footprintWidth=Math.max(...bottom.map(p=>p.x))-Math.min(...bottom.map(p=>p.x));}
-    body.plugin.debugPartCount=body.parts&&body.parts.length>1?body.parts.length-1:body.parts.length;body.plugin.debugMass=body.mass;body.plugin.debugInertia=body.inertia;body.plugin.debugComOffsetX=comOffset.x;body.plugin.debugComOffsetY=comOffset.y;body.plugin.debugComOffset=Math.hypot(comOffset.x,comOffset.y);body.plugin.debugFootprintWidth=footprintWidth;body.plugin.debugAspectRatio=Math.max(w,h)/Math.max(1,Math.min(w,h));
-    return body;
+    body.plugin.debugPartCount=body.parts&&body.parts.length>1?body.parts.length-1:body.parts.length;body.plugin.debugMass=body.mass;body.plugin.debugInertia=body.inertia;body.plugin.debugComOffsetX=comOffset.x;body.plugin.debugComOffsetY=comOffset.y;body.plugin.debugComOffset=Math.hypot(comOffset.x,comOffset.y);body.plugin.debugFootprintWidth=footprintWidth;body.plugin.debugAspectRatio=Math.max(w,h)/Math.max(1,Math.min(w,h));return body;
   }
   function add(body){World.add(world,body);}
   function hold(body,x,y,angle=0){Body.setStatic(body,true);Body.setPosition(body,{x,y});Body.setAngle(body,angle);Body.setVelocity(body,{x:0,y:0});Body.setAngularVelocity(body,0);Sleeping.set(body,true);}
   function release(body){Body.setStatic(body,false);Sleeping.set(body,false);body.plugin=body.plugin||{};body.plugin.settleFrames=0;body.plugin.releaseFrames=0;Body.setVelocity(body,{x:0,y:0});Body.setAngularVelocity(body,0);}
   function move(body,x,y){Body.setPosition(body,{x,y});Body.setVelocity(body,{x:0,y:0});Body.setAngularVelocity(body,0);body.plugin=body.plugin||{};body.plugin.settleFrames=0;body.plugin.releaseFrames=0;Sleeping.set(body,true);}
   function rotate(body,delta){Body.rotate(body,delta);Body.setVelocity(body,{x:0,y:0});Body.setAngularVelocity(body,0);body.plugin=body.plugin||{};body.plugin.settleFrames=0;body.plugin.releaseFrames=0;Sleeping.set(body,true);}
-  function step(dt){
-    const totalMs=Math.max(1,Math.min(33,dt*1000)),subDt=totalMs/SUB_STEPS;
-    for(let i=0;i<SUB_STEPS;i++)Engine.update(engine,subDt);
-  }
+  function step(dt){const totalMs=Math.max(1,Math.min(33,dt*1000)),subDt=totalMs/SUB_STEPS;for(let i=0;i<SUB_STEPS;i++)Engine.update(engine,subDt);}
   return {engine,world,setup,createPieceBody,add,hold,release,move,rotate,step};
 })();
