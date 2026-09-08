@@ -9,13 +9,13 @@
   <title>仁さんタワー</title>
   <link rel="stylesheet" href="style.css">
 <style>
-.measurementDebug{margin-top:14px;padding-top:14px;border-top:1px solid rgba(0,0,0,.12)}
-.measurementTitle{font-weight:700;margin-bottom:5px}
-.measurementStatus{font-size:12px;line-height:1.45;margin-bottom:8px;opacity:.8}
-.measurementButton{margin:0;min-height:56px;padding:9px 12px}
-.measurementButton strong{font-size:14px}
-.measurementButton span{font-size:10px}
-.measurementDownload{display:block;margin-top:8px;text-align:center;font-weight:700;text-decoration:none;padding:10px;border-radius:10px;background:#fff;color:inherit;border:1px solid rgba(0,0,0,.18)}
+.measurementDebug{margin-top:14px;padding-top:14px;border-top:1px solid rgba(0,0,0,.12);font-family:inherit}
+.measurementTitle{font-weight:700;margin-bottom:5px;font-family:inherit}
+.measurementStatus{font-size:12px;line-height:1.45;margin-bottom:8px;opacity:.8;font-family:inherit}
+.measurementButton{margin:0;min-height:56px;padding:9px 12px;font-family:inherit}
+.measurementButton strong{font-size:14px;font-family:inherit}
+.measurementButton span{font-size:10px;font-family:inherit}
+.measurementDownload{display:block;margin-top:8px;text-align:center;font-weight:700;text-decoration:none;padding:10px;border-radius:10px;background:#fff;color:inherit;border:1px solid rgba(0,0,0,.18);font-family:inherit}
 </style>
 </head>
 <body>
@@ -27,11 +27,7 @@
     <div class="stage">
       <canvas id="gameCanvas"></canvas>
       <div class="hud">
-        <div class="scorePanel">
-          <div><span class="hudLabel">SCORE</span><strong id="hudScore">0</strong></div>
-          <div><span class="hudLabel">BEST</span><strong id="hudBest">—</strong></div>
-          <div><span class="hudLabel">HEIGHT</span><strong id="hudHeight">0.0</strong><small>m</small></div>
-        </div>
+        <div class="scorePanel"><div><span class="hudLabel">SCORE</span><strong id="hudScore">0</strong></div><div><span class="hudLabel">BEST</span><strong id="hudBest">—</strong></div><div><span class="hudLabel">HEIGHT</span><strong id="hudHeight">0.0</strong><small>m</small></div></div>
         <div id="nextPanel" class="nextPanel"><span class="nextLabel">NEXT</span><div class="nextPreview"><img id="nextPieceImage" alt="次のピース"></div></div>
       </div>
       <div id="status" class="status">読み込み中…</div>
@@ -43,37 +39,20 @@
           <button id="normalModeButton" class="modeButton normalModeButton" type="button"><strong>通常モード</strong><span>土台の外へ落ちるとゲームオーバー</span></button>
           <button id="endlessModeButton" class="modeButton endlessModeButton" type="button"><strong>エンドレスモード</strong><span>左右の壁で落下を防ぎ、どこまでも積み上げる</span></button>
           <div id="measurementDebug" class="measurementDebug hidden">
-            <div class="measurementTitle">物理挙動デバッグ v1.25.0</div>
-            <div id="measurementStatus" class="measurementStatus">v1.25.0 計測待機中</div>
+            <div class="measurementTitle">物理挙動デバッグ</div>
+            <div id="measurementStatus" class="measurementStatus">計測待機中</div>
             <button id="measurementButton" class="modeButton measurementButton" type="button"><strong>全ピース自動計測</strong><span>着地前後の衝突データを記録</span></button>
             <a id="measurementDownload" class="measurementDownload hidden" download>計測ZIPを保存</a>
           </div>
         </div>
       </div>
       <div id="resultScreen" class="resultScreen hidden">
-        <div class="resultCard">
-          <h2>ゲームオーバー</h2><div id="newRecord" class="newRecord hidden">NEW RECORD!</div>
-          <p class="resultLabel">今回のスコア</p><div id="resultScore" class="resultScore">0</div>
-          <div class="resultStats"><span>高さ <strong id="resultHeight">0.0</strong>m</span><span>積み上げ <strong id="resultPieces">0</strong>個</span></div>
-          <p class="bestTitle">歴代ベスト3</p><ol id="bestScores" class="bestScores"></ol>
-          <button id="restartButton" class="restartButton" type="button">もう一度遊ぶ</button>
-        </div>
+        <div class="resultCard"><h2>ゲームオーバー</h2><div id="newRecord" class="newRecord hidden">NEW RECORD!</div><p class="resultLabel">今回のスコア</p><div id="resultScore" class="resultScore">0</div><div class="resultStats"><span>高さ <strong id="resultHeight">0.0</strong>m</span><span>積み上げ <strong id="resultPieces">0</strong>個</span></div><p class="bestTitle">歴代ベスト3</p><ol id="bestScores" class="bestScores"></ol><button id="restartButton" class="restartButton" type="button">もう一度遊ぶ</button></div>
       </div>
     </div>
-    <div class="controls">
-      <button id="rotateLeft" type="button" aria-label="左回転"><span class="buttonText">左回転</span></button>
-      <button id="drop" type="button"><span class="buttonIcon dropIcon">▼</span><span class="buttonText">落とす</span></button>
-      <button id="rotateRight" type="button" aria-label="右回転"><span class="buttonText">右回転</span></button>
-    </div>
+    <div class="controls"><button id="rotateLeft" type="button" aria-label="左回転"><span class="buttonText">左回転</span></button><button id="drop" type="button"><span class="buttonIcon dropIcon">▼</span><span class="buttonText">落とす</span></button><button id="rotateRight" type="button" aria-label="右回転"><span class="buttonText">右回転</span></button></div>
   </main>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.20.0/matter.min.js"></script>
-  <script src="js/physics.js"></script>
-  <script src="js/piece.js"></script>
-  <script src="js/renderer.js"></script>
-  <script src="js/input.js"></script>
-  <script src="js/game.js"></script>
-  <script src="js/main.js"></script>
-  <script src="js/physics-stabilization.js"></script>
-  <script src="js/measurement.js"></script>
+  <script src="js/physics.js"></script><script src="js/piece.js"></script><script src="js/renderer.js"></script><script src="js/input.js"></script><script src="js/game.js"></script><script src="js/main.js"></script><script src="js/physics-stabilization.js"></script><script src="js/measurement.js"></script>
 </body>
 </html>
