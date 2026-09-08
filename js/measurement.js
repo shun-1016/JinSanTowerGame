@@ -1,8 +1,8 @@
-/* v1.29.0 - measurement schema cleanup / per-contact landing diagnostics */
+/* v1.29.1 - landing collision/stale-body diagnostics / modal version ownership */
 (() => {
   'use strict';
 
-  const VERSION = 'v1.29.0';
+  const VERSION = 'v1.29.1';
   const ASSET_PREFIX = 'assets/';
   const MAX_DISCOVERY = 999;
   const POST_LAND_FRAMES = 60;
@@ -36,14 +36,15 @@
     'max_bounce_height_px','sleep_frame','final_sleeping','final_ground_contact',
     'physics_parts','triangles','regions','raw_regions','contour_vertices',
     'landing_contact_left_offset_px','landing_contact_right_offset_px','landing_contact_normal_angle_rad','landing_contact_torque_proxy',
-    'landing_contact_parts_detail','landing_contact_offsets_xy_px','landing_contact_torque_proxies'
+    'landing_contact_parts_detail','landing_contact_offsets_xy_px','landing_contact_torque_proxies',
+    'landing_dynamic_body_count','landing_other_dynamic_body_ids'
   ];
 
   const validationHeader = ['run','piece','status','raw_row_count','landing_frame','expected_row_count','row_count_ok','landing_present','post_land_60_ok'];
 
   const state = {
     images: [], run: 1, index: 0, frame: 0, startedAt: 0, landingFrame: null, rows: [], allRows: [], summaries: [],
-    stageW: 390, stageH: 500, baseWidth: 0, piece: null, body: null, running: false, landingContactDetail: null
+    stageW: 390, stageH: 500, baseWidth: 0, piece: null, body: null, running: false, landingContactDetail: null, landingOtherDynamicBodyIds: []
   };
 
   async function loadImage(n){
@@ -208,7 +209,9 @@
       Number(land?.[colIndex('contact_left_offset_px')]),Number(land?.[colIndex('contact_right_offset_px')]),Number(land?.[colIndex('contact_normal_angle_rad')]),Number(land?.[colIndex('contact_torque_proxy')]),
       (state.landingContactDetail||[]).map(c=>String(c.partId)).join(';'),
       (state.landingContactDetail||[]).map(c=>`${num(c.x)}:${num(c.y)}`).join(';'),
-      (state.landingContactDetail||[]).map(c=>num(c.torque,6)).join(';')
+      (state.landingContactDetail||[]).map(c=>num(c.torque,6)).join(';'),
+      Number((Physics.world?.bodies||[]).filter(b=>!b.isStatic).length || 0),
+      (state.landingOtherDynamicBodyIds||[]).join(';')
     ]);
     state.allRows.push(...state.rows);
   }
@@ -218,14 +221,21 @@
     const x=state.stageW/2,y=Math.max(80,state.stageH*0.18);
     const p=Piece.create(index,state.images,x,y); p.body.plugin=p.body.plugin||{}; p.body.plugin.debugFixedPiece=true;
     Physics.add(p.body); Physics.hold(p.body,x,y,0); Physics.release(p.body);
-    state.index=index; state.frame=0; state.startedAt=performance.now(); state.landingFrame=null; state.landingContactDetail=null; state.rows=[]; state.piece=p; state.body=p.body;
+    state.index=index; state.frame=0; state.startedAt=performance.now(); state.landingFrame=null; state.landingContactDetail=null; state.landingOtherDynamicBodyIds=[]; state.rows=[]; state.piece=p; state.body=p.body;
   }
 
   function observeFrame(){
     if(!state.running || !state.body) return;
     const body=state.body;
     const contact=groundContact(body);
-    if(state.landingFrame===null && contact){ state.landingFrame=state.frame; state.landingContactDetail=contactGeometry(body).contactDetails; }
+    if(state.landingFrame===null && contact){
+      state.landingFrame=state.frame;
+      state.landingContactDetail=contactGeometry(body).contactDetails;
+      state.landingOtherDynamicBodyIds=(Physics.world?.bodies||[])
+        .filter(b=>!b.isStatic && b!==body)
+        .map(b=>b.id)
+        .filter(v=>v!==undefined);
+    }
     const phase=state.landingFrame===null?'falling':'post_landing';
     state.rows.push(rowFor(body,phase));
 
@@ -408,7 +418,7 @@
       debug.querySelectorAll('*').forEach(el=>{ el.style.fontFamily='inherit'; });
     }
     const title=document.querySelector('.measurementTitle'); if(title) title.textContent=`物理挙動デバッグ ${VERSION}`;
-    const status=$('measurementStatus'); if(status) status.textContent=`${state.images.length}ピース検出。着地接触点・Physics Part診断を計測できます。`;
+    const status=$('measurementStatus'); if(status) status.textContent=`${state.images.length}ピース検出。着地接触点・Physics Part・残存Body診断を計測できます。`;
     const span=clean.querySelector('span'); if(span) span.textContent='着地前後の衝突データを記録';
   }
 
