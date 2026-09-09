@@ -1,12 +1,14 @@
-/* v1.33.4 - latched landing correction diagnostics / geometric ground-edge contact */
+/* v1.33.5 - ground-contact impulse timing diagnostics / geometric ground-edge contact */
 const Physics = (() => {
   const {Engine,World,Bodies,Body,Sleeping}=Matter;
   const SUB_STEPS=4;
   const engine=Engine.create({enableSleeping:true,positionIterations:12,velocityIterations:8,constraintIterations:2});
+  let physicsSubstepCounter=0;
   engine.gravity.x=0;engine.gravity.y=1;engine.gravity.scale=0.001;
   const world=engine.world; let ground=null,sideWalls=[];
 
   function setup(width,groundY,baseWidth=width,isEndless=false){
+    physicsSubstepCounter=0;
     if(ground) World.remove(world,ground);
     if(sideWalls.length){World.remove(world,sideWalls);sideWalls=[];}
     const bw=Math.max(100,baseWidth),left=(width-bw)/2,right=left+bw;
@@ -221,9 +223,42 @@ const Physics = (() => {
     const totalMs=Math.max(1,Math.min(33,dt*1000)),subDt=totalMs/SUB_STEPS;
     for(let i=0;i<SUB_STEPS;i++){
       const dynamicBodies=world.bodies.filter(b=>!b.isStatic&&b.label==='piece');
-      const before=dynamicBodies.map(body=>({body,omega:body.angularVelocity}));
+      const before=dynamicBodies.map(body=>({
+        body,
+        omega:body.angularVelocity,
+        vx:body.velocity.x,
+        vy:body.velocity.y,
+        x:body.position.x,
+        y:body.position.y
+      }));
       Engine.update(engine,subDt);
-      for(const item of before)suppressNarrowLandingTorque(item.body,item.omega);
+      physicsSubstepCounter++;
+      for(const item of before){
+        suppressNarrowLandingTorque(item.body,item.omega);
+        const info=getGroundContactInfo(item.body);
+        const plugin=item.body.plugin=item.body.plugin||{};
+        if(info){
+          const deltaVx=item.body.velocity.x-item.vx;
+          const deltaVy=item.body.velocity.y-item.vy;
+          const deltaOmega=item.body.angularVelocity-item.omega;
+          const event={
+            substep:physicsSubstepCounter,
+            vxBefore:item.vx,vxAfter:item.body.velocity.x,deltaVx,
+            vyBefore:item.vy,vyAfter:item.body.velocity.y,deltaVy,
+            angularBefore:item.omega,angularAfter:item.body.angularVelocity,deltaAngular:deltaOmega,
+            xBefore:item.x,xAfter:item.body.position.x,deltaX:item.body.position.x-item.x,
+            yBefore:item.y,yAfter:item.body.position.y,deltaY:item.body.position.y-item.y,
+            contactWidth:info.span,contactOffset:info.offset,contactSource:info.source
+          };
+          if(!plugin.firstGroundContactEventLatched){
+            plugin.firstGroundContactEventLatched=true;
+            plugin.firstGroundContactEvent=event;
+          }
+          if(!plugin.maxGroundDeltaVxEventLatched || Math.abs(deltaVx)>Math.abs(plugin.maxGroundDeltaVxEventLatched.deltaVx)){
+            plugin.maxGroundDeltaVxEventLatched=event;
+          }
+        }
+      }
     }
   }
   return {engine,world,setup,createPieceBody,add,hold,release,move,rotate,step};

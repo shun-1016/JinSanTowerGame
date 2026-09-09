@@ -1,8 +1,8 @@
-/* v1.33.4 - latched landing correction diagnostics / modal version ownership */
+/* v1.33.5 - ground-contact impulse timing diagnostics / modal version ownership */
 (() => {
   'use strict';
 
-  const VERSION = 'v1.33.4';
+  const VERSION = 'v1.33.5';
   const ASSET_PREFIX = 'assets/';
   const MAX_DISCOVERY = 999;
   const POST_LAND_FRAMES = 60;
@@ -44,7 +44,13 @@
     'narrow_landing_correction','narrow_landing_correction_applied',
     'narrow_landing_correction_latched','narrow_landing_contact_width_latched_px','narrow_landing_contact_source_latched','narrow_landing_contact_offset_latched_px',
     'narrow_landing_angular_before_latched','narrow_landing_angular_delta_latched','narrow_landing_angular_after_latched',
-    'narrow_landing_width_condition_latched','narrow_landing_offset_condition_latched','narrow_landing_delta_condition_latched','narrow_landing_correction_applied_latched'
+    'narrow_landing_width_condition_latched','narrow_landing_offset_condition_latched','narrow_landing_delta_condition_latched','narrow_landing_correction_applied_latched',
+    'first_ground_contact_substep','first_ground_contact_vx_before','first_ground_contact_vx_after','first_ground_contact_delta_vx',
+    'first_ground_contact_vy_before','first_ground_contact_vy_after','first_ground_contact_delta_vy',
+    'first_ground_contact_angular_before','first_ground_contact_angular_after','first_ground_contact_delta_angular',
+    'first_ground_contact_delta_x','first_ground_contact_delta_y','first_ground_contact_width_px','first_ground_contact_offset_px','first_ground_contact_source',
+    'max_ground_delta_vx','max_ground_delta_vx_before','max_ground_delta_vx_after','max_ground_delta_vy','max_ground_delta_angular',
+    'max_ground_delta_vx_substep','max_ground_delta_vx_contact_width_px','max_ground_delta_vx_contact_offset_px','max_ground_delta_vx_contact_source'
   ];
 
   const validationHeader = ['run','piece','status','raw_row_count','landing_frame','expected_row_count','row_count_ok','landing_present','post_land_60_ok'];
@@ -226,7 +232,31 @@
       num(p.narrowLandingCorrection,6), p.narrowLandingCorrectionApplied?1:0,
       num(p.narrowLandingCorrectionLatched,6), num(p.narrowLandingContactSpanLatched), p.narrowLandingContactSourceLatched||'', num(p.narrowLandingContactOffsetLatched),
       num(p.narrowLandingAngularBeforeLatched,6), num(p.narrowLandingAngularDeltaLatched,6), num(p.narrowLandingAngularAfterLatched,6),
-      p.narrowLandingWidthConditionLatched?1:0, p.narrowLandingOffsetConditionLatched?1:0, p.narrowLandingDeltaConditionLatched?1:0, p.narrowLandingCorrectionAppliedLatched?1:0
+      p.narrowLandingWidthConditionLatched?1:0, p.narrowLandingOffsetConditionLatched?1:0, p.narrowLandingDeltaConditionLatched?1:0, p.narrowLandingCorrectionAppliedLatched?1:0,
+      p.firstGroundContactEventLatched&&p.firstGroundContactEvent ? p.firstGroundContactEvent.substep : '',
+      p.firstGroundContactEventLatched&&p.firstGroundContactEvent ? num(p.firstGroundContactEvent.vxBefore,6) : '',
+      p.firstGroundContactEventLatched&&p.firstGroundContactEvent ? num(p.firstGroundContactEvent.vxAfter,6) : '',
+      p.firstGroundContactEventLatched&&p.firstGroundContactEvent ? num(p.firstGroundContactEvent.deltaVx,6) : '',
+      p.firstGroundContactEventLatched&&p.firstGroundContactEvent ? num(p.firstGroundContactEvent.vyBefore,6) : '',
+      p.firstGroundContactEventLatched&&p.firstGroundContactEvent ? num(p.firstGroundContactEvent.vyAfter,6) : '',
+      p.firstGroundContactEventLatched&&p.firstGroundContactEvent ? num(p.firstGroundContactEvent.deltaVy,6) : '',
+      p.firstGroundContactEventLatched&&p.firstGroundContactEvent ? num(p.firstGroundContactEvent.angularBefore,6) : '',
+      p.firstGroundContactEventLatched&&p.firstGroundContactEvent ? num(p.firstGroundContactEvent.angularAfter,6) : '',
+      p.firstGroundContactEventLatched&&p.firstGroundContactEvent ? num(p.firstGroundContactEvent.deltaAngular,6) : '',
+      p.firstGroundContactEventLatched&&p.firstGroundContactEvent ? num(p.firstGroundContactEvent.deltaX,6) : '',
+      p.firstGroundContactEventLatched&&p.firstGroundContactEvent ? num(p.firstGroundContactEvent.deltaY,6) : '',
+      p.firstGroundContactEventLatched&&p.firstGroundContactEvent ? num(p.firstGroundContactEvent.contactWidth) : '',
+      p.firstGroundContactEventLatched&&p.firstGroundContactEvent ? num(p.firstGroundContactEvent.contactOffset) : '',
+      p.firstGroundContactEventLatched&&p.firstGroundContactEvent ? p.firstGroundContactEvent.contactSource : '',
+      p.maxGroundDeltaVxEventLatched ? num(p.maxGroundDeltaVxEventLatched.deltaVx,6) : '',
+      p.maxGroundDeltaVxEventLatched ? num(p.maxGroundDeltaVxEventLatched.vxBefore,6) : '',
+      p.maxGroundDeltaVxEventLatched ? num(p.maxGroundDeltaVxEventLatched.vxAfter,6) : '',
+      p.maxGroundDeltaVxEventLatched ? num(p.maxGroundDeltaVxEventLatched.deltaVy,6) : '',
+      p.maxGroundDeltaVxEventLatched ? num(p.maxGroundDeltaVxEventLatched.deltaAngular,6) : '',
+      p.maxGroundDeltaVxEventLatched ? p.maxGroundDeltaVxEventLatched.substep : '',
+      p.maxGroundDeltaVxEventLatched ? num(p.maxGroundDeltaVxEventLatched.contactWidth) : '',
+      p.maxGroundDeltaVxEventLatched ? num(p.maxGroundDeltaVxEventLatched.contactOffset) : '',
+      p.maxGroundDeltaVxEventLatched ? p.maxGroundDeltaVxEventLatched.contactSource : ''
     ]);
     state.allRows.push(...state.rows);
   }
@@ -246,6 +276,9 @@
     p.body.plugin.narrowLandingWidthConditionLatched=false;
     p.body.plugin.narrowLandingOffsetConditionLatched=false;
     p.body.plugin.narrowLandingDeltaConditionLatched=false;
+    p.body.plugin.firstGroundContactEventLatched=false;
+    p.body.plugin.firstGroundContactEvent=null;
+    p.body.plugin.maxGroundDeltaVxEventLatched=null;
     Physics.add(p.body); Physics.hold(p.body,x,y,0); Physics.release(p.body);
     state.index=index; state.frame=0; state.startedAt=performance.now(); state.landingFrame=null; state.landingContactDetail=null; state.landingOtherDynamicBodyIds=[]; state.rows=[]; state.piece=p; state.body=p.body;
   }
