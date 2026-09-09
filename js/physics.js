@@ -1,4 +1,4 @@
-/* v1.30.0 - exact-alpha geometry / optimized convex-part merge experiment */
+/* v1.30.1 - micro-edge smoothing experiment */
 const Physics = (() => {
   const {Engine,World,Bodies,Body,Sleeping}=Matter;
   const SUB_STEPS=4;
@@ -65,13 +65,36 @@ const Physics = (() => {
   function mergeRegionPolys(regions){
     let polys=regions.map(r=>r.map(p=>({x:p.x,y:p.y}))),changed=true;while(changed){changed=false;outer:for(let i=0;i<polys.length;i++)for(let j=i+1;j<polys.length;j++){const a=polys[i],b=polys[j];let shared=false;for(let ai=0;ai<a.length&&!shared;ai++){const a1=a[ai],a2=a[(ai+1)%a.length];for(let bj=0;bj<b.length;bj++){if(samePointExact(a1,b[(bj+1)%b.length])&&samePointExact(a2,b[bj])){shared=true;break;}}}if(!shared)continue;const merged=mergeTwoConvexPolys(a,b);if(!merged)continue;polys[i]=merged;polys.splice(j,1);changed=true;break outer;}}return polys;
   }
+  // v1.30.1: micro-edge smoothing experiment.
+  // The smoothing is inward-only at each convex part corner: it cuts off
+  // sub-pixel/very-short corner features rather than expanding the shape.
+  // Large silhouette features, holes, and concavities are not intentionally
+  // bridged or filled. This is a controlled approximation experiment, not
+  // an exact-alpha geometry mode.
+  const SMOOTH_RADIUS_PX=0.45;
+  const SMOOTH_MIN_EDGE_PX=1.20;
+  function smoothConvexPoly(poly){
+    if(!poly||poly.length<3)return poly;
+    const out=[];
+    for(let i=0;i<poly.length;i++){
+      const prev=poly[(i-1+poly.length)%poly.length],p=poly[i],next=poly[(i+1)%poly.length];
+      const a=Math.hypot(p.x-prev.x,p.y-prev.y),b=Math.hypot(next.x-p.x,next.y-p.y);
+      if(a<SMOOTH_MIN_EDGE_PX||b<SMOOTH_MIN_EDGE_PX){
+        const u1={x:(prev.x-p.x)/Math.max(a,1e-9),y:(prev.y-p.y)/Math.max(a,1e-9)};
+        const u2={x:(next.x-p.x)/Math.max(b,1e-9),y:(next.y-p.y)/Math.max(b,1e-9)};
+        out.push({x:p.x+(u1.x+u2.x)*SMOOTH_RADIUS_PX,y:p.y+(u1.y+u2.y)*SMOOTH_RADIUS_PX});
+      }else out.push(p);
+    }
+    return isConvex(out)?out:poly;
+  }
+
   function createPieceBody(x,y,w,h,shape){
     const options={label:'piece',friction:0.55,frictionStatic:0.70,frictionAir:0.015,restitution:0,density:0.002,sleepThreshold:60,slop:0.05};
     const rawRegions=shape&&Array.isArray(shape.regions)?shape.regions:[],regions=rawRegions.length?mergeRegionPolys(rawRegions):[],allTriangles=[];let failed=false,failReason='NONE',failIteration=-1,remainingVertices=0;
     for(const region of regions){const result=triangulateDetailed(region);if(result.diag.failed){failed=true;if(failReason==='NONE')failReason=result.diag.failReason||'REGION_TRIANGULATION_FAILED';failIteration=result.diag.failIteration;remainingVertices=result.diag.remainingVertices;continue;}allTriangles.push(...result.triangles);}
     if(!regions.length&&shape&&shape.contour&&shape.contour.length>=3){const result=triangulateDetailed(shape.contour);if(result.diag.failed){failed=true;failReason=result.diag.failReason||'CONTOUR_TRIANGULATION_FAILED';failIteration=result.diag.failIteration;remainingVertices=result.diag.remainingVertices;}else allTriangles.push(...result.triangles);}
     const convexPolys=allTriangles.length?convexDecomposeOptimized(allTriangles):[];let body=null,fallback=false;
-    if(convexPolys.length){const parts=convexPolys.map(poly=>{const cx=poly.reduce((s,p)=>s+p.x,0)/poly.length,cy=poly.reduce((s,p)=>s+p.y,0)/poly.length;return Bodies.fromVertices(cx,cy,[poly],{...options,label:'piece-part'},false,0.001,0.001,0.001);});if(parts.length){body=Body.create({...options,parts:parts.slice()});const comLocal={x:body.position.x,y:body.position.y};body.plugin=body.plugin||{};body.plugin.imageVisualOffset={x:-comLocal.x,y:-comLocal.y};body.plugin.debugCompoundCOMLocal=comLocal;Body.setPosition(body,{x,y});}}
+    if(convexPolys.length){const parts=convexPolys.map(poly=>{const smoothed=smoothConvexPoly(poly);const cx=smoothed.reduce((s,p)=>s+p.x,0)/smoothed.length,cy=smoothed.reduce((s,p)=>s+p.y,0)/smoothed.length;return Bodies.fromVertices(cx,cy,[smoothed],{...options,label:'piece-part'},false,0.001,0.001,0.001);});if(parts.length){body=Body.create({...options,parts:parts.slice()});const comLocal={x:body.position.x,y:body.position.y};body.plugin=body.plugin||{};body.plugin.imageVisualOffset={x:-comLocal.x,y:-comLocal.y};body.plugin.debugCompoundCOMLocal=comLocal;Body.setPosition(body,{x,y});}}
     if(!body){body=Bodies.rectangle(x,y,Math.max(10,w),Math.max(10,h),options);fallback=true;body.plugin=body.plugin||{};body.plugin.imageVisualOffset={x:0,y:0};}
     const areaTotal=allTriangles.reduce((s,t)=>s+Math.abs(area(t)),0),diag={inputCount:regions.reduce((s,r)=>s+r.length,0),cleanCount:regions.reduce((s,r)=>s+r.length,0),area:areaTotal,winding:'CCW',selfIntersection:false,selfIntersectionEdges:null,triangles:allTriangles.length,failed,failReason:failed?failReason:'NONE',failIteration,remainingVertices};
     body.plugin=body.plugin||{};body.plugin.imageWidth=w;body.plugin.imageHeight=h;body.plugin.debugContours=shape&&shape.debugContours?shape.debugContours:[];body.plugin.debugContourVertexCount=shape&&shape.pointCount||0;body.plugin.debugTriangulatedCount=allTriangles.length;body.plugin.debugConvexPartCount=convexPolys.length;body.plugin.debugTriangulation=diag;body.plugin.debugFallback=fallback;body.plugin.debugShapeReady=!fallback&&allTriangles.length>0;body.plugin.debugBodyCreated=true;body.plugin.debugHoleCount=shape&&shape.holeCount||0;body.plugin.debugRegionCount=regions.length;body.plugin.debugRawRegionCount=rawRegions.length;body.plugin.debugPartCentroids=convexPolys.map(poly=>({x:poly.reduce((s,p)=>s+p.x,0)/poly.length,y:poly.reduce((s,p)=>s+p.y,0)/poly.length}));
