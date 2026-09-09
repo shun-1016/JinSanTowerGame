@@ -1,4 +1,4 @@
-/* v1.32.0 - slop experiment / exact-alpha geometry / optimized convex-part merge */
+/* v1.33.0 - narrow-contact landing torque suppression experiment */
 const Physics = (() => {
   const {Engine,World,Bodies,Body,Sleeping}=Matter;
   const SUB_STEPS=4;
@@ -83,6 +83,71 @@ const Physics = (() => {
   function release(body){Body.setStatic(body,false);Sleeping.set(body,false);body.plugin=body.plugin||{};body.plugin.settleFrames=0;body.plugin.releaseFrames=0;Body.setVelocity(body,{x:0,y:0});Body.setAngularVelocity(body,0);}
   function move(body,x,y){Body.setPosition(body,{x,y});Body.setVelocity(body,{x:0,y:0});Body.setAngularVelocity(body,0);body.plugin=body.plugin||{};body.plugin.settleFrames=0;body.plugin.releaseFrames=0;Sleeping.set(body,true);}
   function rotate(body,delta){Body.rotate(body,delta);Body.setVelocity(body,{x:0,y:0});Body.setAngularVelocity(body,0);body.plugin=body.plugin||{};body.plugin.settleFrames=0;body.plugin.releaseFrames=0;Sleeping.set(body,true);}
-  function step(dt){const totalMs=Math.max(1,Math.min(33,dt*1000)),subDt=totalMs/SUB_STEPS;for(let i=0;i<SUB_STEPS;i++)Engine.update(engine,subDt);}
+  // v1.33.0 experiment:
+  // When a piece lands on an extremely narrow support while its contact point is
+  // far from the COM, the discrete collision response can inject a large angular
+  // velocity. Preserve ordinary rotation, but suppress only the collision-generated
+  // portion of angular velocity. The correction is based on the actual contact
+  // geometry, not on piece ID or the total number of assets.
+  const NARROW_CONTACT_THRESHOLD_PX=8;
+  const CONTACT_OFFSET_THRESHOLD_PX=5;
+  const MAX_LANDING_ANGULAR_CORRECTION=0.70;
+  const MIN_COLLISION_DELTA_ANGULAR=0.02;
+
+  function clamp01(v){return Math.max(0,Math.min(1,v));}
+  function getBodyRoot(part){return part&&part.parent?part.parent:part;}
+  function getGroundContactInfo(body){
+    if(!ground||!body||body.isStatic)return null;
+    const points=[];
+    const pairs=engine.pairs&&engine.pairs.list?engine.pairs.list:[];
+    const root=getBodyRoot(body);
+    for(const pair of pairs){
+      if(!pair||!pair.isActive)continue;
+      let moving=null;
+      if(pair.bodyA===ground&&getBodyRoot(pair.bodyB)===root)moving=pair.bodyB;
+      else if(pair.bodyB===ground&&getBodyRoot(pair.bodyA)===root)moving=pair.bodyA;
+      if(!moving)continue;
+      const supports=pair.collision&&pair.collision.supports?pair.collision.supports:[];
+      for(const v of supports){
+        if(v&&Number.isFinite(v.x)&&Number.isFinite(v.y))points.push(v);
+      }
+    }
+    if(!points.length)return null;
+    const minX=Math.min(...points.map(p=>p.x)),maxX=Math.max(...points.map(p=>p.x));
+    const span=Math.max(0,maxX-minX);
+    const center=(minX+maxX)/2;
+    const offset=Math.abs(center-body.position.x);
+    return {span,offset,points};
+  }
+
+  function suppressNarrowLandingTorque(body,beforeAngularVelocity){
+    const info=getGroundContactInfo(body);
+    if(!info)return;
+    if(info.span>=NARROW_CONTACT_THRESHOLD_PX)return;
+    if(info.offset<=CONTACT_OFFSET_THRESHOLD_PX)return;
+    const delta=body.angularVelocity-beforeAngularVelocity;
+    if(Math.abs(delta)<MIN_COLLISION_DELTA_ANGULAR)return;
+
+    const narrowFactor=clamp01((NARROW_CONTACT_THRESHOLD_PX-info.span)/NARROW_CONTACT_THRESHOLD_PX);
+    const offsetFactor=clamp01((info.offset-CONTACT_OFFSET_THRESHOLD_PX)/12);
+    const correction=Math.min(MAX_LANDING_ANGULAR_CORRECTION,narrowFactor*offsetFactor);
+    if(correction<=0)return;
+
+    Body.setAngularVelocity(body,beforeAngularVelocity+delta*(1-correction));
+    body.plugin=body.plugin||{};
+    body.plugin.lastNarrowLandingContactSpan=info.span;
+    body.plugin.lastNarrowLandingContactOffset=info.offset;
+    body.plugin.lastNarrowLandingAngularCorrection=correction;
+  }
+
+  function step(dt){
+    const totalMs=Math.max(1,Math.min(33,dt*1000)),subDt=totalMs/SUB_STEPS;
+    for(let i=0;i<SUB_STEPS;i++){
+      const dynamicBodies=world.bodies.filter(b=>!b.isStatic&&b.label==='piece');
+      const before=dynamicBodies.map(body=>({body,omega:body.angularVelocity}));
+      Engine.update(engine,subDt);
+      for(const item of before)suppressNarrowLandingTorque(item.body,item.omega);
+    }
+  }
   return {engine,world,setup,createPieceBody,add,hold,release,move,rotate,step};
 })();
