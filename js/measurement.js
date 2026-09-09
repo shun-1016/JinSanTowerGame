@@ -2,7 +2,7 @@
 (() => {
   'use strict';
 
-  const VERSION = 'v1.33.8';
+  const VERSION = 'v1.34.0';
   const ASSET_PREFIX = 'assets/';
   const MAX_DISCOVERY = 999;
   const POST_LAND_FRAMES = 60;
@@ -32,7 +32,7 @@
   // large file. Current-state narrow-contact fields are removed because they
   // can be overwritten by later substeps; the latched event is retained.
   const summaryHeader = [
-    'run','piece','status','frame_count','landing_frame','post_land_frame_count','mass','inertia','com_offset_px','footprint_width_px','contact_points','contact_parts',
+    'run','piece','compound_mode','status','frame_count','landing_frame','post_land_frame_count','mass','inertia','com_offset_px','footprint_width_px','contact_points','contact_parts',
     'landing_angle','landing_pre_vx','landing_pre_vy','landing_pre_angular_velocity','landing_vx','landing_vy','landing_angular_velocity','landing_delta_vx','landing_delta_vy','landing_delta_angular_velocity',
     'max_post_land_abs_vx','max_post_land_abs_vy','max_post_land_abs_angular_velocity','post_land_x_range','post_land_y_range','post_land_angle_range','max_bounce_height_px','sleep_frame','final_sleeping','final_ground_contact',
     'physics_parts','triangles','regions','raw_regions','contour_vertices','landing_contact_left_offset_px','landing_contact_right_offset_px','landing_contact_normal_angle_rad','landing_contact_torque_proxy',
@@ -246,7 +246,7 @@
       for(let ci=0;ci<cps.length;ci++){const c=cps[ci];state.contactChanges=state.contactChanges||[];state.contactChanges.push([state.run,state.index+1,ei+1,ci+1,c.substep,c.reason,Array.from(c.partIds||[]).join(';'),num(c.contactWidth),num(c.contactOffset),num(c.vxBefore,6),num(c.vxAfter,6),num(c.deltaVx,6),num(c.vyBefore,6),num(c.vyAfter,6),num(c.deltaVy,6),num(c.angularBefore,6),num(c.angularAfter,6),num(c.deltaAngular,6),num(c.deltaVn,6),num(c.deltaVt,6),num(c.x),num(c.angle,6),num(c.cumulativeDeltaX),num(c.cumulativeDeltaAngle,6),Number(c.contactPoints||0),Number(c.supportCount||0)]);}
     }
     state.summaries.push([
-      state.run,state.index+1,status,arr.length,state.landingFrame===null?'':state.landingFrame,state.landingFrame===null?0:Math.max(0,arr.length-state.landingFrame-1),
+      state.run,state.index+1,(state.body&&state.body.plugin&&state.body.plugin.debugCompoundMode)||'',status,arr.length,state.landingFrame===null?'':state.landingFrame,state.landingFrame===null?0:Math.max(0,arr.length-state.landingFrame-1),
       Number(firstDiag[colIndex('mass')]),Number(firstDiag[colIndex('inertia')]),Number(firstDiag[colIndex('com_offset_px')]),Number(firstDiag[colIndex('footprint_width_px')]),
       Number(land?.[colIndex('contact_points')]),Number(land?.[colIndex('contact_parts')]),
       Number(land?.[colIndex('angle')]),Number(land?.[colIndex('pre_velocity_x')]),Number(land?.[colIndex('pre_velocity_y')]),Number(land?.[colIndex('pre_angular_velocity')]),
@@ -380,11 +380,11 @@
   function makeCsv(header,rows){ return '\ufeff'+header.join(',')+'\n'+rows.map(r=>csvLine(r)).join('\n')+'\n'; }
 
   function metadataRows(){
-    const h=['piece','asset','image_width','image_height','mass','inertia','com_offset_px','footprint_width_px','aspect_ratio','physics_parts','triangles','regions','raw_regions','contour_vertices'];
+    const h=['piece','compound_mode','asset','image_width','image_height','mass','inertia','com_offset_px','footprint_width_px','aspect_ratio','physics_parts','triangles','regions','raw_regions','contour_vertices'];
     const rows=state.images.map((im,i)=>{
       // Create a temporary body only if needed for metadata.
       setupPhysics(); const p=Piece.create(i,state.images,state.stageW/2,Math.max(80,state.stageH*0.18)); const b=p.body,pl=b.plugin||{};
-      return [i+1,`assets/${pad2(i+1)}.${im.src.includes('.PNG')?'PNG':'png'}`,im.naturalWidth||im.width,im.naturalHeight||im.height,num(pl.debugMass||b.mass,5),num(pl.debugInertia||b.inertia,3),num(pl.debugComOffset,3),num(pl.debugFootprintWidth,3),num(pl.debugAspectRatio,4),Number(pl.debugPartCount||0),Number(pl.debugTriangulatedCount||0),Number(pl.debugRegionCount||0),Number(pl.debugRawRegionCount||0),Number(pl.debugContourVertexCount||0)];
+      return [i+1,(b.plugin&&b.plugin.debugCompoundMode)||'',`assets/${pad2(i+1)}.${im.src.includes('.PNG')?'PNG':'png'}`,im.naturalWidth||im.width,im.naturalHeight||im.height,num(pl.debugMass||b.mass,5),num(pl.debugInertia||b.inertia,3),num(pl.debugComOffset,3),num(pl.debugFootprintWidth,3),num(pl.debugAspectRatio,4),Number(pl.debugPartCount||0),Number(pl.debugTriangulatedCount||0),Number(pl.debugRegionCount||0),Number(pl.debugRawRegionCount||0),Number(pl.debugContourVertexCount||0)];
     });
     clearDynamicBodies(); return {h,rows};
   }

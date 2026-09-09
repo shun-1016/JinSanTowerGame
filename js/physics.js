@@ -1,4 +1,4 @@
-/* v1.33.8 - ground-contact change-point diagnostics / compact logging */
+/* v1.34.0 - compound-body construction experiment: triangle-only baseline */
 const Physics = (() => {
   const {Engine,World,Bodies,Body,Sleeping}=Matter;
   const SUB_STEPS=4;
@@ -67,16 +67,25 @@ const Physics = (() => {
   function mergeRegionPolys(regions){
     let polys=regions.map(r=>r.map(p=>({x:p.x,y:p.y}))),changed=true;while(changed){changed=false;outer:for(let i=0;i<polys.length;i++)for(let j=i+1;j<polys.length;j++){const a=polys[i],b=polys[j];let shared=false;for(let ai=0;ai<a.length&&!shared;ai++){const a1=a[ai],a2=a[(ai+1)%a.length];for(let bj=0;bj<b.length;bj++){if(samePointExact(a1,b[(bj+1)%b.length])&&samePointExact(a2,b[bj])){shared=true;break;}}}if(!shared)continue;const merged=mergeTwoConvexPolys(a,b);if(!merged)continue;polys[i]=merged;polys.splice(j,1);changed=true;break outer;}}return polys;
   }
+  const COMPOUND_MODE_PARAM=new URLSearchParams(location.search).get('compound');
+  // v1.34.0 experiment:
+  //   triangles  = each exact alpha-derived triangle is kept as one Physics Part
+  //   optimized = v1.33.8 global convex merging (control condition)
+  // Default is triangles so the experiment changes only Part construction.
+  const COMPOUND_MODE=COMPOUND_MODE_PARAM==='optimized'?'optimized':'triangles';
+
   function createPieceBody(x,y,w,h,shape){
     const options={label:'piece',friction:0.35,frictionStatic:0.45,frictionAir:0.015,restitution:0,density:0.002,sleepThreshold:60,slop:0.10};
     const rawRegions=shape&&Array.isArray(shape.regions)?shape.regions:[],regions=rawRegions.length?mergeRegionPolys(rawRegions):[],allTriangles=[];let failed=false,failReason='NONE',failIteration=-1,remainingVertices=0;
     for(const region of regions){const result=triangulateDetailed(region);if(result.diag.failed){failed=true;if(failReason==='NONE')failReason=result.diag.failReason||'REGION_TRIANGULATION_FAILED';failIteration=result.diag.failIteration;remainingVertices=result.diag.remainingVertices;continue;}allTriangles.push(...result.triangles);}
     if(!regions.length&&shape&&shape.contour&&shape.contour.length>=3){const result=triangulateDetailed(shape.contour);if(result.diag.failed){failed=true;failReason=result.diag.failReason||'CONTOUR_TRIANGULATION_FAILED';failIteration=result.diag.failIteration;remainingVertices=result.diag.remainingVertices;}else allTriangles.push(...result.triangles);}
-    const convexPolys=allTriangles.length?convexDecomposeOptimized(allTriangles):[];let body=null,fallback=false;
-    if(convexPolys.length){const parts=convexPolys.map(poly=>{const cx=poly.reduce((s,p)=>s+p.x,0)/poly.length,cy=poly.reduce((s,p)=>s+p.y,0)/poly.length;return Bodies.fromVertices(cx,cy,[poly],{...options,label:'piece-part'},false,0.001,0.001,0.001);});if(parts.length){body=Body.create({...options,parts:parts.slice()});const comLocal={x:body.position.x,y:body.position.y};body.plugin=body.plugin||{};body.plugin.imageVisualOffset={x:-comLocal.x,y:-comLocal.y};body.plugin.debugCompoundCOMLocal=comLocal;Body.setPosition(body,{x,y});}}
+    const optimizedPolys=allTriangles.length?convexDecomposeOptimized(allTriangles):[];
+    const collisionPolys=COMPOUND_MODE==='triangles'?allTriangles:optimizedPolys;
+    let body=null,fallback=false;
+    if(collisionPolys.length){const parts=collisionPolys.map(poly=>{const cx=poly.reduce((s,p)=>s+p.x,0)/poly.length,cy=poly.reduce((s,p)=>s+p.y,0)/poly.length;return Bodies.fromVertices(cx,cy,[poly],{...options,label:'piece-part'},false,0.001,0.001,0.001);});if(parts.length){body=Body.create({...options,parts:parts.slice()});const comLocal={x:body.position.x,y:body.position.y};body.plugin=body.plugin||{};body.plugin.imageVisualOffset={x:-comLocal.x,y:-comLocal.y};body.plugin.debugCompoundCOMLocal=comLocal;Body.setPosition(body,{x,y});}}
     if(!body){body=Bodies.rectangle(x,y,Math.max(10,w),Math.max(10,h),options);fallback=true;body.plugin=body.plugin||{};body.plugin.imageVisualOffset={x:0,y:0};}
     const areaTotal=allTriangles.reduce((s,t)=>s+Math.abs(area(t)),0),diag={inputCount:regions.reduce((s,r)=>s+r.length,0),cleanCount:regions.reduce((s,r)=>s+r.length,0),area:areaTotal,winding:'CCW',selfIntersection:false,selfIntersectionEdges:null,triangles:allTriangles.length,failed,failReason:failed?failReason:'NONE',failIteration,remainingVertices};
-    body.plugin=body.plugin||{};body.plugin.imageWidth=w;body.plugin.imageHeight=h;body.plugin.debugContours=shape&&shape.debugContours?shape.debugContours:[];body.plugin.debugContourVertexCount=shape&&shape.pointCount||0;body.plugin.debugTriangulatedCount=allTriangles.length;body.plugin.debugConvexPartCount=convexPolys.length;body.plugin.debugTriangulation=diag;body.plugin.debugFallback=fallback;body.plugin.debugShapeReady=!fallback&&allTriangles.length>0;body.plugin.debugBodyCreated=true;body.plugin.debugHoleCount=shape&&shape.holeCount||0;body.plugin.debugRegionCount=regions.length;body.plugin.debugRawRegionCount=rawRegions.length;body.plugin.debugPartCentroids=convexPolys.map(poly=>({x:poly.reduce((s,p)=>s+p.x,0)/poly.length,y:poly.reduce((s,p)=>s+p.y,0)/poly.length}));
+    body.plugin=body.plugin||{};body.plugin.imageWidth=w;body.plugin.imageHeight=h;body.plugin.debugContours=shape&&shape.debugContours?shape.debugContours:[];body.plugin.debugContourVertexCount=shape&&shape.pointCount||0;body.plugin.debugTriangulatedCount=allTriangles.length;body.plugin.debugConvexPartCount=optimizedPolys.length;body.plugin.debugCompoundMode=COMPOUND_MODE;body.plugin.debugCollisionPartCount=collisionPolys.length;body.plugin.debugTriangulation=diag;body.plugin.debugFallback=fallback;body.plugin.debugShapeReady=!fallback&&allTriangles.length>0;body.plugin.debugBodyCreated=true;body.plugin.debugHoleCount=shape&&shape.holeCount||0;body.plugin.debugRegionCount=regions.length;body.plugin.debugRawRegionCount=rawRegions.length;body.plugin.debugPartCentroids=collisionPolys.map(poly=>({x:poly.reduce((s,p)=>s+p.x,0)/poly.length,y:poly.reduce((s,p)=>s+p.y,0)/poly.length}));
     const comOffset=body.plugin.imageVisualOffset||{x:0,y:0},allVerts=(body.parts||[]).slice(1).flatMap(part=>part.vertices||[]);let footprintWidth=0;if(allVerts.length){const maxY=Math.max(...allVerts.map(p=>p.y)),bottom=allVerts.filter(p=>p.y>=maxY-1);if(bottom.length)footprintWidth=Math.max(...bottom.map(p=>p.x))-Math.min(...bottom.map(p=>p.x));}
     body.plugin.debugPartCount=body.parts&&body.parts.length>1?body.parts.length-1:body.parts.length;body.plugin.debugMass=body.mass;body.plugin.debugInertia=body.inertia;body.plugin.debugComOffsetX=comOffset.x;body.plugin.debugComOffsetY=comOffset.y;body.plugin.debugComOffset=Math.hypot(comOffset.x,comOffset.y);body.plugin.debugFootprintWidth=footprintWidth;body.plugin.debugAspectRatio=Math.max(w,h)/Math.max(1,Math.min(w,h));return body;
   }
