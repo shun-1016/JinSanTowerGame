@@ -1,4 +1,4 @@
-/* v1.33.0 - narrow-contact landing torque suppression experiment */
+/* v1.33.1 - geometric ground-edge contact landing torque suppression experiment */
 const Physics = (() => {
   const {Engine,World,Bodies,Body,Sleeping}=Matter;
   const SUB_STEPS=4;
@@ -83,41 +83,80 @@ const Physics = (() => {
   function release(body){Body.setStatic(body,false);Sleeping.set(body,false);body.plugin=body.plugin||{};body.plugin.settleFrames=0;body.plugin.releaseFrames=0;Body.setVelocity(body,{x:0,y:0});Body.setAngularVelocity(body,0);}
   function move(body,x,y){Body.setPosition(body,{x,y});Body.setVelocity(body,{x:0,y:0});Body.setAngularVelocity(body,0);body.plugin=body.plugin||{};body.plugin.settleFrames=0;body.plugin.releaseFrames=0;Sleeping.set(body,true);}
   function rotate(body,delta){Body.rotate(body,delta);Body.setVelocity(body,{x:0,y:0});Body.setAngularVelocity(body,0);body.plugin=body.plugin||{};body.plugin.settleFrames=0;body.plugin.releaseFrames=0;Sleeping.set(body,true);}
-  // v1.33.0 experiment:
-  // When a piece lands on an extremely narrow support while its contact point is
-  // far from the COM, the discrete collision response can inject a large angular
-  // velocity. Preserve ordinary rotation, but suppress only the collision-generated
-  // portion of angular velocity. The correction is based on the actual contact
-  // geometry, not on piece ID or the total number of assets.
+  // v1.33.1 experiment:
+  // Use the actual colliding Part geometry to estimate the ground support span.
+  // collision.supports are retained only as a fallback for point contacts; they
+  // are not treated as the support width of a broad edge.
+  // When a piece lands on an extremely narrow geometric support while the support
+  // center is far from the COM, suppress only the collision-generated angular
+  // velocity. No piece-ID or asset-count dependency is introduced.
   const NARROW_CONTACT_THRESHOLD_PX=8;
   const CONTACT_OFFSET_THRESHOLD_PX=5;
+  const GROUND_EDGE_TOLERANCE_PX=2.5;
   const MAX_LANDING_ANGULAR_CORRECTION=0.70;
   const MIN_COLLISION_DELTA_ANGULAR=0.02;
 
   function clamp01(v){return Math.max(0,Math.min(1,v));}
   function getBodyRoot(part){return part&&part.parent?part.parent:part;}
+
   function getGroundContactInfo(body){
     if(!ground||!body||body.isStatic)return null;
-    const points=[];
-    const pairs=engine.pairs&&engine.pairs.list?engine.pairs.list:[];
     const root=getBodyRoot(body);
+    const contactParts=[];
+    const supports=[];
+    const pairs=engine.pairs&&engine.pairs.list?engine.pairs.list:[];
+
     for(const pair of pairs){
       if(!pair||!pair.isActive)continue;
       let moving=null;
       if(pair.bodyA===ground&&getBodyRoot(pair.bodyB)===root)moving=pair.bodyB;
       else if(pair.bodyB===ground&&getBodyRoot(pair.bodyA)===root)moving=pair.bodyA;
       if(!moving)continue;
-      const supports=pair.collision&&pair.collision.supports?pair.collision.supports:[];
-      for(const v of supports){
-        if(v&&Number.isFinite(v.x)&&Number.isFinite(v.y))points.push(v);
+      if(!contactParts.includes(moving))contactParts.push(moving);
+      const pairSupports=pair.collision&&pair.collision.supports?pair.collision.supports:[];
+      for(const v of pairSupports){
+        if(v&&Number.isFinite(v.x)&&Number.isFinite(v.y))supports.push(v);
       }
     }
-    if(!points.length)return null;
-    const minX=Math.min(...points.map(p=>p.x)),maxX=Math.max(...points.map(p=>p.x));
-    const span=Math.max(0,maxX-minX);
-    const center=(minX+maxX)/2;
-    const offset=Math.abs(center-body.position.x);
-    return {span,offset,points};
+    if(!contactParts.length&&!supports.length)return null;
+
+    // Prefer the actual vertices of the Part that is colliding with the ground.
+    // An edge is considered a ground-support edge when both endpoints are close
+    // to the top surface of the ground. Its projected X span is the geometric
+    // support width, independent of how many Matter collision support points exist.
+    const groundTop=ground.bounds.min.y;
+    const edgeSegments=[];
+    for(const part of contactParts){
+      const vertices=part&&part.vertices?part.vertices:[];
+      if(vertices.length<2)continue;
+      for(let i=0;i<vertices.length;i++){
+        const a=vertices[i],b=vertices[(i+1)%vertices.length];
+        if(!a||!b)continue;
+        if(Math.abs(a.y-groundTop)<=GROUND_EDGE_TOLERANCE_PX&&Math.abs(b.y-groundTop)<=GROUND_EDGE_TOLERANCE_PX){
+          edgeSegments.push({a,b});
+        }
+      }
+    }
+
+    if(edgeSegments.length){
+      const xs=edgeSegments.flatMap(e=>[e.a.x,e.b.x]);
+      const minX=Math.min(...xs),maxX=Math.max(...xs);
+      const span=Math.max(0,maxX-minX);
+      const center=(minX+maxX)/2;
+      const offset=Math.abs(center-body.position.x);
+      return {span,offset,points:supports,source:'geometry-edge',edgeSegments};
+    }
+
+    // Genuine point/corner contact has no ground-aligned edge. In that case a
+    // support point is an appropriate zero-width fallback.
+    if(supports.length){
+      const minX=Math.min(...supports.map(p=>p.x)),maxX=Math.max(...supports.map(p=>p.x));
+      const span=Math.max(0,maxX-minX);
+      const center=(minX+maxX)/2;
+      const offset=Math.abs(center-body.position.x);
+      return {span,offset,points:supports,source:'collision-support-fallback',edgeSegments:[]};
+    }
+    return null;
   }
 
   function suppressNarrowLandingTorque(body,beforeAngularVelocity){
@@ -136,6 +175,7 @@ const Physics = (() => {
     Body.setAngularVelocity(body,beforeAngularVelocity+delta*(1-correction));
     body.plugin=body.plugin||{};
     body.plugin.lastNarrowLandingContactSpan=info.span;
+    body.plugin.lastNarrowLandingContactSource=info.source;
     body.plugin.lastNarrowLandingContactOffset=info.offset;
     body.plugin.lastNarrowLandingAngularCorrection=correction;
   }
