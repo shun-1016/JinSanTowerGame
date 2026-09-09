@@ -1,8 +1,8 @@
-/* v1.33.3 - landing correction diagnostics / modal version ownership */
+/* v1.33.4 - latched landing correction diagnostics / modal version ownership */
 (() => {
   'use strict';
 
-  const VERSION = 'v1.33.3';
+  const VERSION = 'v1.33.4';
   const ASSET_PREFIX = 'assets/';
   const MAX_DISCOVERY = 999;
   const POST_LAND_FRAMES = 60;
@@ -41,7 +41,10 @@
     'narrow_landing_evaluated','narrow_landing_contact_width_px','narrow_landing_contact_source','narrow_landing_contact_offset_px',
     'narrow_landing_angular_before','narrow_landing_angular_delta','narrow_landing_angular_after',
     'narrow_landing_width_condition','narrow_landing_offset_condition','narrow_landing_delta_condition',
-    'narrow_landing_correction','narrow_landing_correction_applied'
+    'narrow_landing_correction','narrow_landing_correction_applied',
+    'narrow_landing_correction_latched','narrow_landing_contact_width_latched_px','narrow_landing_contact_source_latched','narrow_landing_contact_offset_latched_px',
+    'narrow_landing_angular_before_latched','narrow_landing_angular_delta_latched','narrow_landing_angular_after_latched',
+    'narrow_landing_width_condition_latched','narrow_landing_offset_condition_latched','narrow_landing_delta_condition_latched','narrow_landing_correction_applied_latched'
   ];
 
   const validationHeader = ['run','piece','status','raw_row_count','landing_frame','expected_row_count','row_count_ok','landing_present','post_land_60_ok'];
@@ -220,7 +223,10 @@
       p.narrowLandingEvaluated?1:0, num(p.narrowLandingContactSpan), p.narrowLandingContactSource||'', num(p.narrowLandingContactOffset),
       num(p.narrowLandingAngularBefore,6), num(p.narrowLandingAngularDelta,6), num(p.narrowLandingAngularAfter,6),
       p.narrowLandingCondition?1:0, p.narrowLandingOffsetCondition?1:0, p.narrowLandingDeltaCondition?1:0,
-      num(p.narrowLandingCorrection,6), p.narrowLandingCorrectionApplied?1:0
+      num(p.narrowLandingCorrection,6), p.narrowLandingCorrectionApplied?1:0,
+      num(p.narrowLandingCorrectionLatched,6), num(p.narrowLandingContactSpanLatched), p.narrowLandingContactSourceLatched||'', num(p.narrowLandingContactOffsetLatched),
+      num(p.narrowLandingAngularBeforeLatched,6), num(p.narrowLandingAngularDeltaLatched,6), num(p.narrowLandingAngularAfterLatched,6),
+      p.narrowLandingWidthConditionLatched?1:0, p.narrowLandingOffsetConditionLatched?1:0, p.narrowLandingDeltaConditionLatched?1:0, p.narrowLandingCorrectionAppliedLatched?1:0
     ]);
     state.allRows.push(...state.rows);
   }
@@ -229,6 +235,17 @@
     setupPhysics();
     const x=state.stageW/2,y=Math.max(80,state.stageH*0.18);
     const p=Piece.create(index,state.images,x,y); p.body.plugin=p.body.plugin||{}; p.body.plugin.debugFixedPiece=true;
+    p.body.plugin.narrowLandingCorrectionAppliedLatched=false;
+    p.body.plugin.narrowLandingCorrectionLatched=NaN;
+    p.body.plugin.narrowLandingContactSpanLatched=NaN;
+    p.body.plugin.narrowLandingContactSourceLatched='';
+    p.body.plugin.narrowLandingContactOffsetLatched=NaN;
+    p.body.plugin.narrowLandingAngularBeforeLatched=NaN;
+    p.body.plugin.narrowLandingAngularDeltaLatched=NaN;
+    p.body.plugin.narrowLandingAngularAfterLatched=NaN;
+    p.body.plugin.narrowLandingWidthConditionLatched=false;
+    p.body.plugin.narrowLandingOffsetConditionLatched=false;
+    p.body.plugin.narrowLandingDeltaConditionLatched=false;
     Physics.add(p.body); Physics.hold(p.body,x,y,0); Physics.release(p.body);
     state.index=index; state.frame=0; state.startedAt=performance.now(); state.landingFrame=null; state.landingContactDetail=null; state.landingOtherDynamicBodyIds=[]; state.rows=[]; state.piece=p; state.body=p.body;
   }

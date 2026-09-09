@@ -1,4 +1,4 @@
-/* v1.33.2 - landing correction diagnostics / geometric ground-edge contact */
+/* v1.33.4 - latched landing correction diagnostics / geometric ground-edge contact */
 const Physics = (() => {
   const {Engine,World,Bodies,Body,Sleeping}=Matter;
   const SUB_STEPS=4;
@@ -193,6 +193,22 @@ const Physics = (() => {
     body.plugin.narrowLandingAngularAfter=after;
     body.plugin.narrowLandingCorrection=correction;
     body.plugin.narrowLandingCorrectionApplied=true;
+
+    // Latch the first actual correction event so later substeps cannot overwrite
+    // the evidence before measurement captures the landing frame.
+    if(!body.plugin.narrowLandingCorrectionAppliedLatched){
+      body.plugin.narrowLandingCorrectionAppliedLatched=true;
+      body.plugin.narrowLandingCorrectionLatched=correction;
+      body.plugin.narrowLandingContactSpanLatched=info.span;
+      body.plugin.narrowLandingContactSourceLatched=info.source;
+      body.plugin.narrowLandingContactOffsetLatched=info.offset;
+      body.plugin.narrowLandingAngularBeforeLatched=beforeAngularVelocity;
+      body.plugin.narrowLandingAngularDeltaLatched=delta;
+      body.plugin.narrowLandingAngularAfterLatched=after;
+      body.plugin.narrowLandingWidthConditionLatched=true;
+      body.plugin.narrowLandingOffsetConditionLatched=true;
+      body.plugin.narrowLandingDeltaConditionLatched=true;
+    }
 
     // Keep the legacy v1.33.1 diagnostic names for compatibility.
     body.plugin.lastNarrowLandingContactSpan=info.span;
