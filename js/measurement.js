@@ -1,8 +1,8 @@
-/* v1.33.2 - landing correction diagnostics / modal version ownership */
+/* v1.33.3 - landing correction diagnostics / modal version ownership */
 (() => {
   'use strict';
 
-  const VERSION = 'v1.33.2';
+  const VERSION = 'v1.33.3';
   const ASSET_PREFIX = 'assets/';
   const MAX_DISCOVERY = 999;
   const POST_LAND_FRAMES = 60;
@@ -192,6 +192,7 @@
   function nums(arr,name){ const i=colIndex(name); return arr.map(a=>Number(a[i])).filter(Number.isFinite); }
 
   function finishPiece(status){
+    const p=state.body&&state.body.plugin?state.body.plugin:{};
     const arr=parseRows(state.rows); const first=arr[0]||[]; const land=state.landingFrame===null?arr[0]:arr[Math.min(state.landingFrame,Math.max(0,arr.length-1))]||arr[0];
     const post=state.landingFrame===null?[]:arr.filter(a=>Number(a[colIndex('frame')])>=state.landingFrame);
     const xs=nums(post,'x'),ys=nums(post,'y'),angs=nums(post,'angle'),vxs=nums(post,'velocity_x'),vys=nums(post,'velocity_y'),avs=nums(post,'angular_velocity');
