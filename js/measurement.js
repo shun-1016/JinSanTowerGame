@@ -1,8 +1,8 @@
-/* v1.30.2 - landing collision/stale-body diagnostics / modal version ownership */
+/* v1.30.0 - landing collision/stale-body diagnostics / modal version ownership */
 (() => {
   'use strict';
 
-  const VERSION = 'v1.30.2';
+  const VERSION = 'v1.31.0';
   const ASSET_PREFIX = 'assets/';
   const MAX_DISCOVERY = 999;
   const POST_LAND_FRAMES = 60;
