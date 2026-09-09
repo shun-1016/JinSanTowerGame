@@ -1,8 +1,8 @@
-/* v1.33.1 - landing collision/stale-body diagnostics / modal version ownership */
+/* v1.33.2 - landing correction diagnostics / modal version ownership */
 (() => {
   'use strict';
 
-  const VERSION = 'v1.33.1';
+  const VERSION = 'v1.33.2';
   const ASSET_PREFIX = 'assets/';
   const MAX_DISCOVERY = 999;
   const POST_LAND_FRAMES = 60;
@@ -37,7 +37,11 @@
     'physics_parts','triangles','regions','raw_regions','contour_vertices',
     'landing_contact_left_offset_px','landing_contact_right_offset_px','landing_contact_normal_angle_rad','landing_contact_torque_proxy',
     'landing_contact_parts_detail','landing_contact_offsets_xy_px','landing_contact_torque_proxies',
-    'landing_dynamic_body_count','landing_other_dynamic_body_ids'
+    'landing_dynamic_body_count','landing_other_dynamic_body_ids',
+    'narrow_landing_evaluated','narrow_landing_contact_width_px','narrow_landing_contact_source','narrow_landing_contact_offset_px',
+    'narrow_landing_angular_before','narrow_landing_angular_delta','narrow_landing_angular_after',
+    'narrow_landing_width_condition','narrow_landing_offset_condition','narrow_landing_delta_condition',
+    'narrow_landing_correction','narrow_landing_correction_applied'
   ];
 
   const validationHeader = ['run','piece','status','raw_row_count','landing_frame','expected_row_count','row_count_ok','landing_present','post_land_60_ok'];
@@ -211,7 +215,11 @@
       (state.landingContactDetail||[]).map(c=>`${num(c.x)}:${num(c.y)}`).join(';'),
       (state.landingContactDetail||[]).map(c=>num(c.torque,6)).join(';'),
       Number((Physics.world?.bodies||[]).filter(b=>!b.isStatic).length || 0),
-      (state.landingOtherDynamicBodyIds||[]).join(';')
+      (state.landingOtherDynamicBodyIds||[]).join(';'),
+      p.narrowLandingEvaluated?1:0, num(p.narrowLandingContactSpan), p.narrowLandingContactSource||'', num(p.narrowLandingContactOffset),
+      num(p.narrowLandingAngularBefore,6), num(p.narrowLandingAngularDelta,6), num(p.narrowLandingAngularAfter,6),
+      p.narrowLandingCondition?1:0, p.narrowLandingOffsetCondition?1:0, p.narrowLandingDeltaCondition?1:0,
+      num(p.narrowLandingCorrection,6), p.narrowLandingCorrectionApplied?1:0
     ]);
     state.allRows.push(...state.rows);
   }

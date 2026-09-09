@@ -1,4 +1,4 @@
-/* v1.33.1 - geometric ground-edge contact landing torque suppression experiment */
+/* v1.33.2 - landing correction diagnostics / geometric ground-edge contact */
 const Physics = (() => {
   const {Engine,World,Bodies,Body,Sleeping}=Matter;
   const SUB_STEPS=4;
@@ -160,7 +160,23 @@ const Physics = (() => {
   }
 
   function suppressNarrowLandingTorque(body,beforeAngularVelocity){
+    body.plugin=body.plugin||{};
     const info=getGroundContactInfo(body);
+    // Record every evaluation, not only cases where a correction is applied.
+    // This makes v1.33.2 an observation-only extension of v1.33.1: physics
+    // parameters and the correction formula itself are unchanged.
+    body.plugin.narrowLandingEvaluated=!!info;
+    body.plugin.narrowLandingContactSpan=info?info.span:NaN;
+    body.plugin.narrowLandingContactSource=info?info.source:'';
+    body.plugin.narrowLandingContactOffset=info?info.offset:NaN;
+    body.plugin.narrowLandingAngularBefore=beforeAngularVelocity;
+    body.plugin.narrowLandingAngularAfter=body.angularVelocity;
+    body.plugin.narrowLandingAngularDelta=info?body.angularVelocity-beforeAngularVelocity:NaN;
+    body.plugin.narrowLandingCondition=!!info && info.span<NARROW_CONTACT_THRESHOLD_PX;
+    body.plugin.narrowLandingOffsetCondition=!!info && info.offset>CONTACT_OFFSET_THRESHOLD_PX;
+    body.plugin.narrowLandingDeltaCondition=!!info && Math.abs(body.angularVelocity-beforeAngularVelocity)>=MIN_COLLISION_DELTA_ANGULAR;
+    body.plugin.narrowLandingCorrection=0;
+    body.plugin.narrowLandingCorrectionApplied=false;
     if(!info)return;
     if(info.span>=NARROW_CONTACT_THRESHOLD_PX)return;
     if(info.offset<=CONTACT_OFFSET_THRESHOLD_PX)return;
@@ -172,8 +188,13 @@ const Physics = (() => {
     const correction=Math.min(MAX_LANDING_ANGULAR_CORRECTION,narrowFactor*offsetFactor);
     if(correction<=0)return;
 
-    Body.setAngularVelocity(body,beforeAngularVelocity+delta*(1-correction));
-    body.plugin=body.plugin||{};
+    const after=beforeAngularVelocity+delta*(1-correction);
+    Body.setAngularVelocity(body,after);
+    body.plugin.narrowLandingAngularAfter=after;
+    body.plugin.narrowLandingCorrection=correction;
+    body.plugin.narrowLandingCorrectionApplied=true;
+
+    // Keep the legacy v1.33.1 diagnostic names for compatibility.
     body.plugin.lastNarrowLandingContactSpan=info.span;
     body.plugin.lastNarrowLandingContactSource=info.source;
     body.plugin.lastNarrowLandingContactOffset=info.offset;
