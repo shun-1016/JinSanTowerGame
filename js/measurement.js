@@ -2,7 +2,7 @@
 (() => {
   'use strict';
 
-  const VERSION = 'v1.33.6';
+  const VERSION = 'v1.33.7';
   const ASSET_PREFIX = 'assets/';
   const MAX_DISCOVERY = 999;
   const POST_LAND_FRAMES = 60;
@@ -27,45 +27,36 @@
 
   // Summary is intentionally compact: derived/redundant contact metrics are omitted,
   // while landing pre-state and per-contact diagnostics are retained for analysis.
+  // Summary is the primary analysis file. Keep one row per piece and split
+  // exported CSVs into small piece ranges so retrieval does not truncate a
+  // large file. Current-state narrow-contact fields are removed because they
+  // can be overwritten by later substeps; the latched event is retained.
   const summaryHeader = [
-    'run','piece','status','frame_count','landing_frame','post_land_frame_count',
-    'mass','inertia','com_offset_px','footprint_width_px','contact_points','contact_parts',
-    'landing_angle','landing_pre_vx','landing_pre_vy','landing_pre_angular_velocity',
-    'landing_vx','landing_vy','landing_angular_velocity','landing_delta_vx','landing_delta_vy','landing_delta_angular_velocity',
-    'max_post_land_abs_vx','max_post_land_abs_vy','max_post_land_abs_angular_velocity','post_land_x_range','post_land_y_range','post_land_angle_range',
-    'max_bounce_height_px','sleep_frame','final_sleeping','final_ground_contact',
-    'physics_parts','triangles','regions','raw_regions','contour_vertices',
-    'landing_contact_left_offset_px','landing_contact_right_offset_px','landing_contact_normal_angle_rad','landing_contact_torque_proxy',
+    'run','piece','status','frame_count','landing_frame','post_land_frame_count','mass','inertia','com_offset_px','footprint_width_px','contact_points','contact_parts',
+    'landing_angle','landing_pre_vx','landing_pre_vy','landing_pre_angular_velocity','landing_vx','landing_vy','landing_angular_velocity','landing_delta_vx','landing_delta_vy','landing_delta_angular_velocity',
+    'max_post_land_abs_vx','max_post_land_abs_vy','max_post_land_abs_angular_velocity','post_land_x_range','post_land_y_range','post_land_angle_range','max_bounce_height_px','sleep_frame','final_sleeping','final_ground_contact',
+    'physics_parts','triangles','regions','raw_regions','contour_vertices','landing_contact_left_offset_px','landing_contact_right_offset_px','landing_contact_normal_angle_rad','landing_contact_torque_proxy',
     'landing_contact_parts_detail','landing_contact_offsets_xy_px','landing_contact_torque_proxies',
-    'landing_dynamic_body_count','landing_other_dynamic_body_ids',
-    'narrow_landing_evaluated','narrow_landing_contact_width_px','narrow_landing_contact_source','narrow_landing_contact_offset_px',
-    'narrow_landing_angular_before','narrow_landing_angular_delta','narrow_landing_angular_after',
-    'narrow_landing_width_condition','narrow_landing_offset_condition','narrow_landing_delta_condition',
-    'narrow_landing_correction','narrow_landing_correction_applied',
-    'narrow_landing_correction_latched','narrow_landing_contact_width_latched_px','narrow_landing_contact_source_latched','narrow_landing_contact_offset_latched_px',
-    'narrow_landing_angular_before_latched','narrow_landing_angular_delta_latched','narrow_landing_angular_after_latched',
-    'narrow_landing_width_condition_latched','narrow_landing_offset_condition_latched','narrow_landing_delta_condition_latched','narrow_landing_correction_applied_latched',
-    'first_ground_contact_substep','first_ground_contact_vx_before','first_ground_contact_vx_after','first_ground_contact_delta_vx',
-    'first_ground_contact_vy_before','first_ground_contact_vy_after','first_ground_contact_delta_vy',
-    'first_ground_contact_angular_before','first_ground_contact_angular_after','first_ground_contact_delta_angular',
-    'first_ground_contact_delta_x','first_ground_contact_delta_y','first_ground_contact_width_px','first_ground_contact_offset_px','first_ground_contact_source',
-    'max_ground_delta_vx','max_ground_delta_vx_before','max_ground_delta_vx_after','max_ground_delta_vy','max_ground_delta_angular',
-    'max_ground_delta_vx_substep','max_ground_delta_vx_contact_width_px','max_ground_delta_vx_contact_offset_px','max_ground_delta_vx_contact_source',
-    'first_ground_response_normal_x','first_ground_response_normal_y','first_ground_response_normal_angle_rad','first_ground_response_tangent_x','first_ground_response_tangent_y',
-    'first_ground_response_depth','first_ground_response_separation','first_ground_response_friction','first_ground_response_friction_static',
-    'first_ground_response_delta_vn','first_ground_response_delta_vt','first_ground_response_linear_impulse_normal_proxy','first_ground_response_linear_impulse_tangent_proxy','first_ground_response_angular_impulse_proxy',
-    'first_ground_response_pair_count','first_ground_response_contact_count','first_ground_response_support_count',
-    'max_ground_response_normal_x','max_ground_response_normal_y','max_ground_response_normal_angle_rad','max_ground_response_tangent_x','max_ground_response_tangent_y',
-    'max_ground_response_depth','max_ground_response_separation','max_ground_response_friction','max_ground_response_friction_static',
-    'max_ground_response_delta_vn','max_ground_response_delta_vt','max_ground_response_linear_impulse_normal_proxy','max_ground_response_linear_impulse_tangent_proxy','max_ground_response_angular_impulse_proxy',
-    'max_ground_response_pair_count','max_ground_response_contact_count','max_ground_response_support_count'
+    'narrow_landing_correction_latched','narrow_landing_contact_width_latched_px','narrow_landing_contact_source_latched','narrow_landing_contact_offset_latched_px','narrow_landing_angular_before_latched','narrow_landing_angular_delta_latched','narrow_landing_angular_after_latched','narrow_landing_correction_applied_latched',
+    'first_ground_contact_substep','first_ground_contact_vx_before','first_ground_contact_vx_after','first_ground_contact_delta_vx','first_ground_contact_vy_before','first_ground_contact_vy_after','first_ground_contact_delta_vy','first_ground_contact_angular_before','first_ground_contact_angular_after','first_ground_contact_delta_angular','first_ground_contact_delta_x','first_ground_contact_delta_y','first_ground_contact_width_px','first_ground_contact_offset_px','first_ground_contact_source',
+    'max_ground_delta_vx','max_ground_delta_vx_before','max_ground_delta_vx_after','max_ground_delta_vy','max_ground_delta_angular','max_ground_delta_vx_substep','max_ground_delta_vx_contact_width_px','max_ground_delta_vx_contact_offset_px','max_ground_delta_vx_contact_source',
+    'first_ground_response_normal_x','first_ground_response_normal_y','first_ground_response_normal_angle_rad','first_ground_response_tangent_x','first_ground_response_tangent_y','first_ground_response_depth','first_ground_response_separation','first_ground_response_friction','first_ground_response_friction_static','first_ground_response_delta_vn','first_ground_response_delta_vt','first_ground_response_linear_impulse_normal_proxy','first_ground_response_linear_impulse_tangent_proxy','first_ground_response_angular_impulse_proxy','first_ground_response_pair_count','first_ground_response_contact_count','first_ground_response_support_count','first_ground_response_pair_id',
+    'max_ground_response_normal_x','max_ground_response_normal_y','max_ground_response_normal_angle_rad','max_ground_response_tangent_x','max_ground_response_tangent_y','max_ground_response_depth','max_ground_response_separation','max_ground_response_friction','max_ground_response_friction_static','max_ground_response_delta_vn','max_ground_response_delta_vt','max_ground_response_linear_impulse_normal_proxy','max_ground_response_linear_impulse_tangent_proxy','max_ground_response_angular_impulse_proxy','max_ground_response_pair_count','max_ground_response_contact_count','max_ground_response_support_count','max_ground_response_pair_id'
   ];
+
+  // Compact motion log. Full-resolution contact behavior is represented by
+  // contact_events.csv; this file keeps only landing-adjacent and periodic frames.
+  const frameHeader = ['piece','phase','frame','time_ms','landing_frame','x','y','velocity_x','velocity_y','angular_velocity','angle','sleeping','ground_contact','contact_width_px','contact_center_offset_px','contact_points','contact_parts','pre_velocity_x','pre_velocity_y','pre_angular_velocity','delta_velocity_x','delta_velocity_y','delta_angular_velocity','collision_normal_x','collision_normal_y','collision_depth','collision_separation','collision_pair_count','collision_contact_count','collision_support_count','collision_contact_part_count'];
+
+  // One row per continuous ground-contact interval. This is the main v1.33.7
+  // diagnostic and is intentionally aggregate rather than one row per substep.
+  const contactEventHeader = ['run','piece','event_index','start_substep','end_substep','duration_substeps','part_ids','start_x','end_x','delta_x','start_y','end_y','delta_y','start_angle','end_angle','delta_angle','start_vx','end_vx','delta_vx','start_vy','end_vy','delta_vy','start_angular_velocity','end_angular_velocity','delta_angular_velocity','min_contact_width_px','max_contact_width_px','max_contact_offset_px','max_abs_delta_vx','max_delta_vx_substep','max_delta_vx_width_px','max_delta_vx_offset_px','max_delta_vn','max_delta_vt','max_abs_delta_angular','max_delta_angular_substep','max_abs_delta_vt','sum_abs_delta_vx'];
 
   const validationHeader = ['run','piece','status','raw_row_count','landing_frame','expected_row_count','row_count_ok','landing_present','post_land_60_ok'];
 
   const state = {
     images: [], run: 1, index: 0, frame: 0, startedAt: 0, landingFrame: null, rows: [], allRows: [], summaries: [],
-    stageW: 390, stageH: 500, baseWidth: 0, piece: null, body: null, running: false, landingContactDetail: null, landingOtherDynamicBodyIds: []
+    stageW: 390, stageH: 500, baseWidth: 0, piece: null, body: null, running: false, landingContactDetail: null, landingOtherDynamicBodyIds: [], contactEvents: []
   };
 
   async function loadImage(n){
@@ -207,6 +198,19 @@
   function parseRows(rows){ return rows.map(r=>r.split(',')).filter(a=>a.length===csvHeader.length); }
   function colIndex(name){ return csvHeader.indexOf(name); }
   function nums(arr,name){ const i=colIndex(name); return arr.map(a=>Number(a[i])).filter(Number.isFinite); }
+  function compactFrameRow(arr){
+    const get=n=>arr[colIndex(n)]??'';
+    return [get('piece'),get('phase'),get('frame'),get('time_ms'),get('landing_frame'),get('x'),get('y'),get('velocity_x'),get('velocity_y'),get('angular_velocity'),get('angle'),get('sleeping'),get('ground_contact'),get('contact_width_px'),get('contact_center_offset_px'),get('contact_points'),get('contact_parts'),get('pre_velocity_x'),get('pre_velocity_y'),get('pre_angular_velocity'),get('delta_velocity_x'),get('delta_velocity_y'),get('delta_angular_velocity'),get('collision_normal_x'),get('collision_normal_y'),get('collision_depth'),get('collision_separation'),get('collision_pair_count'),get('collision_contact_count'),get('collision_support_count'),get('collision_contact_part_count')];
+  }
+  function selectCompactFrames(rawRows){
+    const parsed=parseRows(rawRows); if(!parsed.length)return []; const fi=colIndex('frame'),gi=colIndex('ground_contact');
+    const landing=parsed.find(a=>a[gi]==='1'),lf=landing?Number(landing[fi]):NaN,keep=new Set();
+    for(let f=0;f<parsed.length;f+=10)keep.add(f);
+    for(let f=0;f<Math.min(10,parsed.length);f++)keep.add(f);
+    if(Number.isFinite(lf))for(let f=Math.max(0,lf-2);f<=lf+POST_LAND_FRAMES;f++)keep.add(f);
+    keep.add(parsed.length-1); return parsed.filter(a=>keep.has(Number(a[fi]))).map(compactFrameRow);
+  }
+
 
   function responseSummary(r,prefix){
     if(!r) return Array(18).fill('');
@@ -219,6 +223,7 @@
   }
 
   function finishPiece(status){
+    if(state.body && Physics.finalizeGroundContactHistory) Physics.finalizeGroundContactHistory(state.body);
     const p=state.body&&state.body.plugin?state.body.plugin:{};
     const arr=parseRows(state.rows); const first=arr[0]||[]; const land=state.landingFrame===null?arr[0]:arr[Math.min(state.landingFrame,Math.max(0,arr.length-1))]||arr[0];
     const post=state.landingFrame===null?[]:arr.filter(a=>Number(a[colIndex('frame')])>=state.landingFrame);
@@ -228,6 +233,11 @@
     const last=arr[arr.length-1]||[];
     const maxBounce=Number.isFinite(landingY)&&Number.isFinite(minY)?Math.max(0,landingY-minY):NaN;
     const firstDiag=first;
+    const events=p.groundContactEvents||[];
+    for(let ei=0;ei<events.length;ei++){
+      const e=events[ei];
+      state.contactEvents.push([state.run,state.index+1,ei+1,e.startSubstep,e.endSubstep,e.durationSubsteps,Array.from(e.partIds||[]).join(';'),num(e.startX),num(e.endX),num(e.deltaX),num(e.startY),num(e.endY),num(e.deltaY),num(e.startAngle,6),num(e.endAngle,6),num(e.deltaAngle,6),num(e.startVx,6),num(e.endVx,6),num(e.deltaVx,6),num(e.startVy,6),num(e.endVy,6),num(e.deltaVy,6),num(e.startOmega,6),num(e.endOmega,6),num(e.deltaOmega,6),num(e.minWidth),num(e.maxWidth),num(e.maxOffset),num(e.maxAbsDvx,6),e.maxDvxSubstep,num(e.maxDvxWidth),num(e.maxDvxOffset),num(e.maxDvxVn,6),num(e.maxDvxVt,6),num(e.maxAbsDomega,6),e.maxDomegaSubstep,num(e.maxAbsDvt,6),num(e.totalAbsDvx,6)]);
+    }
     state.summaries.push([
       state.run,state.index+1,status,arr.length,state.landingFrame===null?'':state.landingFrame,state.landingFrame===null?0:Math.max(0,arr.length-state.landingFrame-1),
       Number(firstDiag[colIndex('mass')]),Number(firstDiag[colIndex('inertia')]),Number(firstDiag[colIndex('com_offset_px')]),Number(firstDiag[colIndex('footprint_width_px')]),
@@ -242,15 +252,7 @@
       (state.landingContactDetail||[]).map(c=>String(c.partId)).join(';'),
       (state.landingContactDetail||[]).map(c=>`${num(c.x)}:${num(c.y)}`).join(';'),
       (state.landingContactDetail||[]).map(c=>num(c.torque,6)).join(';'),
-      Number((Physics.world?.bodies||[]).filter(b=>!b.isStatic).length || 0),
-      (state.landingOtherDynamicBodyIds||[]).join(';'),
-      p.narrowLandingEvaluated?1:0, num(p.narrowLandingContactSpan), p.narrowLandingContactSource||'', num(p.narrowLandingContactOffset),
-      num(p.narrowLandingAngularBefore,6), num(p.narrowLandingAngularDelta,6), num(p.narrowLandingAngularAfter,6),
-      p.narrowLandingCondition?1:0, p.narrowLandingOffsetCondition?1:0, p.narrowLandingDeltaCondition?1:0,
-      num(p.narrowLandingCorrection,6), p.narrowLandingCorrectionApplied?1:0,
-      num(p.narrowLandingCorrectionLatched,6), num(p.narrowLandingContactSpanLatched), p.narrowLandingContactSourceLatched||'', num(p.narrowLandingContactOffsetLatched),
-      num(p.narrowLandingAngularBeforeLatched,6), num(p.narrowLandingAngularDeltaLatched,6), num(p.narrowLandingAngularAfterLatched,6),
-      p.narrowLandingWidthConditionLatched?1:0, p.narrowLandingOffsetConditionLatched?1:0, p.narrowLandingDeltaConditionLatched?1:0, p.narrowLandingCorrectionAppliedLatched?1:0,
+      num(p.narrowLandingCorrectionLatched,6), num(p.narrowLandingContactSpanLatched), p.narrowLandingContactSourceLatched||'', num(p.narrowLandingContactOffsetLatched), num(p.narrowLandingAngularBeforeLatched,6), num(p.narrowLandingAngularDeltaLatched,6), num(p.narrowLandingAngularAfterLatched,6), p.narrowLandingCorrectionAppliedLatched?1:0,
       p.firstGroundContactEventLatched&&p.firstGroundContactEvent ? p.firstGroundContactEvent.substep : '',
       p.firstGroundContactEventLatched&&p.firstGroundContactEvent ? num(p.firstGroundContactEvent.vxBefore,6) : '',
       p.firstGroundContactEventLatched&&p.firstGroundContactEvent ? num(p.firstGroundContactEvent.vxAfter,6) : '',
@@ -299,6 +301,8 @@
     p.body.plugin.firstGroundContactEventLatched=false;
     p.body.plugin.firstGroundContactEvent=null;
     p.body.plugin.maxGroundDeltaVxEventLatched=null;
+    p.body.plugin.groundContactEventActive=null;
+    p.body.plugin.groundContactEvents=[];
     Physics.add(p.body); Physics.hold(p.body,x,y,0); Physics.release(p.body);
     state.index=index; state.frame=0; state.startedAt=performance.now(); state.landingFrame=null; state.landingContactDetail=null; state.landingOtherDynamicBodyIds=[]; state.rows=[]; state.piece=p; state.body=p.body;
   }
@@ -400,74 +404,25 @@
   function finishRun(){
     state.running=false; state.piece=null; state.body=null; clearDynamicBodies();
     const meta=metadataRows();
-    const files=[
-      {name:'metadata.csv',content:makeCsv(meta.h,meta.rows)},
-      {name:'validation.csv',content:makeCsv(validationHeader,validationRows())}
-    ];
-
-    // Split summary output into chunks of at most 10 pieces.
-    // The number of chunks and their end piece are derived from the detected
-    // piece count, so this remains valid when new pieces are added later.
-    const summariesByPiece=new Map();
-    for(const row of state.summaries){
-      const piece=Number(row[1]);
-      if(!Number.isInteger(piece)||piece<1) continue;
-      if(!summariesByPiece.has(piece)) summariesByPiece.set(piece,[]);
-      summariesByPiece.get(piece).push(row);
+    const files=[{name:'metadata.csv',content:makeCsv(meta.h,meta.rows)},{name:'validation.csv',content:makeCsv(validationHeader,validationRows())}];
+    const CHUNK_PIECES=5, summariesByPiece=new Map(), eventsByPiece=new Map(), rawByPiece=new Map();
+    for(const row of state.summaries){const piece=Number(row[1]);if(Number.isInteger(piece)&&piece>0){if(!summariesByPiece.has(piece))summariesByPiece.set(piece,[]);summariesByPiece.get(piece).push(row);}}
+    for(const row of state.contactEvents){const piece=Number(row[1]);if(Number.isInteger(piece)&&piece>0){if(!eventsByPiece.has(piece))eventsByPiece.set(piece,[]);eventsByPiece.get(piece).push(row);}}
+    for(const r of state.allRows){const piece=Number(r.split(',')[0]);if(Number.isInteger(piece)&&piece>0){if(!rawByPiece.has(piece))rawByPiece.set(piece,[]);rawByPiece.get(piece).push(r);}}
+    for(let start=1;start<=state.images.length;start+=CHUNK_PIECES){
+      const end=Math.min(start+CHUNK_PIECES-1,state.images.length),summaryRows=[],eventRows=[],frameRows=[];
+      for(let piece=start;piece<=end;piece++){summaryRows.push(...(summariesByPiece.get(piece)||[]));eventRows.push(...(eventsByPiece.get(piece)||[]));frameRows.push(...selectCompactFrames(rawByPiece.get(piece)||[]));}
+      const range=`${pad2(start)}-${pad2(end)}`;
+      files.push({name:`summary_${range}.csv`,content:makeCsv(summaryHeader,summaryRows)});
+      files.push({name:`contact_events_${range}.csv`,content:makeCsv(contactEventHeader,eventRows)});
+      files.push({name:`frames_${range}.csv`,content:makeCsv(frameHeader,frameRows)});
     }
-    for(let start=1; start<=state.images.length; start+=10){
-      const end=Math.min(start+9,state.images.length);
-      const rows=[];
-      for(let piece=start; piece<=end; piece++){
-        rows.push(...(summariesByPiece.get(piece)||[]));
-      }
-      files.push({
-        name:`summary_${pad2(start)}-${pad2(end)}.csv`,
-        content:makeCsv(summaryHeader,rows)
-      });
-    }
-
-    const by=new Map();
-    for(const r of state.allRows){ const p=Number(r.split(',')[0]); if(!by.has(p))by.set(p,[]);by.get(p).push(r); }
-    const runFolder=`run${state.run}`;
-    for(let i=1;i<=state.images.length;i++) files.push({
-      name:`${runFolder}/${pad2(i)}.csv`,
-      content:'\ufeff'+csvHeader.join(',')+'\n'+(by.get(i)||[]).map(r=>r.split(',').map(v=>`"${String(v).replace(/"/g,'""')}"`).join(',')).join('\n')+'\n'
-    });
-
-    // Keep metadata / validation / split summary inside the Run folder.
-    for(const f of files.slice(0,2)) f.name=`${runFolder}/${f.name}`;
-    for(let i=2;i<files.length;i++){
-      if(!files[i].name.startsWith(`${runFolder}/`)) files[i].name=`${runFolder}/${files[i].name}`;
-    }
-
+    const runFolder=`run${state.run}`; for(const f of files)f.name=`${runFolder}/${f.name}`;
     const blob=zip(files),url=URL.createObjectURL(blob),a=$('measurementDownload');
-    if(a){
-      a.href=url;
-      a.download=`JinSanTowerGame_${VERSION}_run${state.run}_collision_diagnostics.zip`;
-      a.textContent=`${VERSION} 計測ZIPを保存`;
-      a.classList.remove('hidden');
-      a.style.display='block';
-
-      // Try the same automatic download behavior used by the previous measurement version.
-      // If the browser blocks programmatic downloads (e.g. iOS browser restrictions),
-      // the visible link remains available as a fallback.
-      try{
-        const auto=document.createElement('a');
-        auto.href=url;
-        auto.download=a.download;
-        auto.style.display='none';
-        document.body.appendChild(auto);
-        auto.click();
-        auto.remove();
-      }catch(e){}
-    }
-    const b=$('measurementButton'); if(b){b.disabled=false;b.textContent='全ピース自動計測';}
-    setStatus(`${VERSION} 計測完了（${state.images.length}ピース / run ${state.run}）`);
-    const s=$('measurementStatus'); if(s) s.textContent=`完了。run ${state.run} のZIPを保存してください。次回はrun番号を変更して再計測。`;
-    const modal=$('modeModal'); if(modal) modal.classList.remove('hidden');
-    const normal=$('normalModeButton'); if(normal) normal.disabled=false;
-    const endless=$('endlessModeButton'); if(endless) endless.disabled=false;
+    if(a){a.href=url;a.download=`JinSanTowerGame_${VERSION}_run${state.run}_diagnostics.zip`;a.textContent=`${VERSION} 計測ZIPを保存`;a.classList.remove('hidden');a.style.display='block';try{const auto=document.createElement('a');auto.href=url;auto.download=a.download;auto.style.display='none';document.body.appendChild(auto);auto.click();auto.remove();}catch(e){}}
+    const b=$('measurementButton');if(b){b.disabled=false;b.textContent='全ピース自動計測';}
+    setStatus(`${VERSION} 計測完了（${state.images.length}ピース / run ${state.run}）`); const ss=$('measurementStatus');if(ss)ss.textContent=`完了。run ${state.run} のZIPを保存してください。CSVは5ピース単位に分割しています。`;
+    const modal=$('modeModal');if(modal)modal.classList.remove('hidden');const normal=$('normalModeButton');if(normal)normal.disabled=false;const endless=$('endlessModeButton');if(endless)endless.disabled=false;
   }
 
   function start(){
@@ -475,7 +430,7 @@
     const run=prompt(`${VERSION} 自動計測\n今回のRun番号を入力してください（例: 1）`,String(state.run));
     if(run===null) return;
     const n=parseInt(run,10); if(!Number.isInteger(n)||n<1){ alert('Run番号は1以上の整数を入力してください。'); return; }
-    state.run=n; state.index=0;state.frame=0;state.rows=[];state.allRows=[];state.summaries=[];state.piece=null;state.body=null;state.running=true;
+    state.run=n; state.index=0;state.frame=0;state.rows=[];state.allRows=[];state.summaries=[];state.contactEvents=[];state.piece=null;state.body=null;state.running=true;
     const modal=$('modeModal'); if(modal) modal.classList.add('hidden');
     const a=$('measurementDownload'); if(a) a.classList.add('hidden');
     const b=$('measurementButton'); if(b)b.disabled=true;

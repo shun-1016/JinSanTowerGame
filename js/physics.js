@@ -1,4 +1,4 @@
-/* v1.33.6 - ground-contact collision response decomposition diagnostics / geometric ground-edge contact */
+/* v1.33.7 - ground-contact history diagnostics / compact logging */
 const Physics = (() => {
   const {Engine,World,Bodies,Body,Sleeping}=Matter;
   const SUB_STEPS=4;
@@ -146,7 +146,7 @@ const Physics = (() => {
       const span=Math.max(0,maxX-minX);
       const center=(minX+maxX)/2;
       const offset=Math.abs(center-body.position.x);
-      return {span,offset,points:supports,source:'geometry-edge',edgeSegments};
+      return {span,offset,points:supports,source:'geometry-edge',edgeSegments,partIds:contactParts.map(p=>p.id).filter(v=>v!==undefined)};
     }
 
     // Genuine point/corner contact has no ground-aligned edge. In that case a
@@ -156,7 +156,7 @@ const Physics = (() => {
       const span=Math.max(0,maxX-minX);
       const center=(minX+maxX)/2;
       const offset=Math.abs(center-body.position.x);
-      return {span,offset,points:supports,source:'collision-support-fallback',edgeSegments:[]};
+      return {span,offset,points:supports,source:'collision-support-fallback',edgeSegments:[],partIds:contactParts.map(p=>p.id).filter(v=>v!==undefined)};
     }
     return null;
   }
@@ -275,6 +275,23 @@ const Physics = (() => {
     body.plugin.lastNarrowLandingAngularCorrection=correction;
   }
 
+  function finalizeGroundContactHistory(body, endSubstep=null){
+    const plugin=body&&body.plugin?body.plugin:null;
+    if(!plugin||!plugin.groundContactEventActive)return;
+    const ev=plugin.groundContactEventActive;
+    ev.endSubstep=endSubstep===null?physicsSubstepCounter:endSubstep;
+    ev.durationSubsteps=Math.max(1,ev.endSubstep-ev.startSubstep+1);
+    // end* is already the last state observed while contact was active. Do not
+    // replace it with the following non-contact substep.
+    ev.deltaX=ev.endX-ev.startX; ev.deltaY=ev.endY-ev.startY;
+    ev.deltaAngle=ev.endAngle-ev.startAngle; ev.deltaVx=ev.endVx-ev.startVx;
+    ev.deltaVy=ev.endVy-ev.startVy; ev.deltaOmega=ev.endOmega-ev.startOmega;
+    ev.partIds=Array.from(ev.partIds||[]);
+    plugin.groundContactEvents=plugin.groundContactEvents||[];
+    plugin.groundContactEvents.push(ev);
+    plugin.groundContactEventActive=null;
+  }
+
   function step(dt){
     const totalMs=Math.max(1,Math.min(33,dt*1000)),subDt=totalMs/SUB_STEPS;
     for(let i=0;i<SUB_STEPS;i++){
@@ -306,7 +323,7 @@ const Physics = (() => {
             xBefore:item.x,xAfter:item.body.position.x,deltaX:item.body.position.x-item.x,
             yBefore:item.y,yAfter:item.body.position.y,deltaY:item.body.position.y-item.y,
             contactWidth:info.span,contactOffset:info.offset,contactSource:info.source,
-            response:response||null
+            partIds:info.partIds||[],response:response||null
           };
           if(!plugin.firstGroundContactEventLatched){
             plugin.firstGroundContactEventLatched=true;
@@ -315,9 +332,43 @@ const Physics = (() => {
           if(!plugin.maxGroundDeltaVxEventLatched || Math.abs(deltaVx)>Math.abs(plugin.maxGroundDeltaVxEventLatched.deltaVx)){
             plugin.maxGroundDeltaVxEventLatched=event;
           }
+
+          if(!plugin.groundContactEventActive){
+            plugin.groundContactEventActive={
+              startSubstep:physicsSubstepCounter,endSubstep:physicsSubstepCounter,durationSubsteps:1,
+              startX:item.body.position.x,startY:item.body.position.y,startAngle:item.body.angle,
+              startVx:item.body.velocity.x,startVy:item.body.velocity.y,startOmega:item.body.angularVelocity,
+              endX:item.body.position.x,endY:item.body.position.y,endAngle:item.body.angle,
+              endVx:item.body.velocity.x,endVy:item.body.velocity.y,endOmega:item.body.angularVelocity,
+              deltaX:0,deltaY:0,deltaAngle:0,deltaVx:0,deltaVy:0,deltaOmega:0,
+              minWidth:info.span,maxWidth:info.span,maxOffset:info.offset,maxAbsDvx:Math.abs(deltaVx),
+              maxDvx:deltaVx,maxDvxSubstep:physicsSubstepCounter,maxDvxWidth:info.span,maxDvxOffset:info.offset,
+              maxDvxVn:response?response.deltaVn:NaN,maxDvxVt:response?response.deltaVt:NaN,
+              maxAbsDomega:Math.abs(deltaOmega),maxDomega:deltaOmega,maxDomegaSubstep:physicsSubstepCounter,
+              maxAbsDvt:response?Math.abs(response.deltaVt):0,totalAbsDvx:Math.abs(deltaVx),
+              partIds:new Set(info.partIds||[])
+            };
+          }else{
+            const ev=plugin.groundContactEventActive;
+            ev.endSubstep=physicsSubstepCounter; ev.durationSubsteps++;
+            ev.endX=item.body.position.x; ev.endY=item.body.position.y; ev.endAngle=item.body.angle;
+            ev.endVx=item.body.velocity.x; ev.endVy=item.body.velocity.y; ev.endOmega=item.body.angularVelocity;
+            ev.minWidth=Math.min(ev.minWidth,info.span); ev.maxWidth=Math.max(ev.maxWidth,info.span);
+            ev.maxOffset=Math.max(ev.maxOffset,info.offset); ev.maxAbsDvx=Math.max(ev.maxAbsDvx,Math.abs(deltaVx));
+            ev.totalAbsDvx+=Math.abs(deltaVx);
+            const dvt=response?response.deltaVt:NaN; if(Number.isFinite(dvt)){ev.maxAbsDvt=Math.max(ev.maxAbsDvt,Math.abs(dvt));}
+            if(Math.abs(deltaVx)>Math.abs(ev.maxDvx)){
+              ev.maxDvx=deltaVx;ev.maxDvxSubstep=physicsSubstepCounter;ev.maxDvxWidth=info.span;ev.maxDvxOffset=info.offset;
+              ev.maxDvxVn=response?response.deltaVn:NaN;ev.maxDvxVt=dvt;
+            }
+            if(Math.abs(deltaOmega)>Math.abs(ev.maxAbsDomega)){ev.maxAbsDomega=Math.abs(deltaOmega);ev.maxDomega=deltaOmega;ev.maxDomegaSubstep=physicsSubstepCounter;}
+            for(const id of (info.partIds||[]))ev.partIds.add(id);
+          }
+        }else if(plugin.groundContactEventActive){
+          finalizeGroundContactHistory(item.body,physicsSubstepCounter-1);
         }
       }
     }
   }
-  return {engine,world,setup,createPieceBody,add,hold,release,move,rotate,step};
+  return {engine,world,setup,createPieceBody,add,hold,release,move,rotate,step,finalizeGroundContactHistory};
 })();
