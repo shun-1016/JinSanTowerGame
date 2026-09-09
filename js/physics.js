@@ -1,4 +1,4 @@
-/* v1.33.7 - ground-contact history diagnostics / compact logging */
+/* v1.33.8 - ground-contact change-point diagnostics / compact logging */
 const Physics = (() => {
   const {Engine,World,Bodies,Body,Sleeping}=Matter;
   const SUB_STEPS=4;
@@ -346,7 +346,20 @@ const Physics = (() => {
               maxDvxVn:response?response.deltaVn:NaN,maxDvxVt:response?response.deltaVt:NaN,
               maxAbsDomega:Math.abs(deltaOmega),maxDomega:deltaOmega,maxDomegaSubstep:physicsSubstepCounter,
               maxAbsDvt:response?Math.abs(response.deltaVt):0,totalAbsDvx:Math.abs(deltaVx),
-              partIds:new Set(info.partIds||[])
+              partIds:new Set(info.partIds||[]),
+              lastPartKey:(info.partIds||[]).slice().sort((a,b)=>a-b).join(';'),
+              lastWidth:info.span,lastOffset:info.offset,
+              changePoints:[{
+                substep:physicsSubstepCounter,reason:'START',
+                partIds:(info.partIds||[]).slice().sort((a,b)=>a-b),
+                contactWidth:info.span,contactOffset:info.offset,
+                vxBefore:item.vx,vxAfter:item.body.velocity.x,deltaVx,
+                vyBefore:item.vy,vyAfter:item.body.velocity.y,deltaVy,
+                angularBefore:item.omega,angularAfter:item.body.angularVelocity,deltaAngular:deltaOmega,
+                deltaVn:response?response.deltaVn:NaN,deltaVt:response?response.deltaVt:NaN,
+                x:item.body.position.x,angle:item.body.angle,cumulativeDeltaX:0,cumulativeDeltaAngle:0,
+                contactPoints:response?response.contactCount:0,supportCount:response?response.supportCount:0
+              }]
             };
           }else{
             const ev=plugin.groundContactEventActive;
@@ -363,6 +376,33 @@ const Physics = (() => {
             }
             if(Math.abs(deltaOmega)>Math.abs(ev.maxAbsDomega)){ev.maxAbsDomega=Math.abs(deltaOmega);ev.maxDomega=deltaOmega;ev.maxDomegaSubstep=physicsSubstepCounter;}
             for(const id of (info.partIds||[]))ev.partIds.add(id);
+
+            const partKey=(info.partIds||[]).slice().sort((a,b)=>a-b).join(';');
+            const partChanged=partKey!==ev.lastPartKey;
+            const widthChanged=Math.abs(info.span-ev.lastWidth)>=1.0;
+            const offsetChanged=Math.abs(info.offset-ev.lastOffset)>=2.0;
+            const responseNotable=Math.abs(deltaVx)>=0.15 || Math.abs(deltaOmega)>=0.05 || (response&&Math.abs(response.deltaVt)>=0.15);
+            if(partChanged||widthChanged||offsetChanged||responseNotable){
+              const reason=[];
+              if(partChanged)reason.push('PART_CHANGE');
+              if(widthChanged)reason.push('WIDTH_CHANGE');
+              if(offsetChanged)reason.push('OFFSET_CHANGE');
+              if(responseNotable)reason.push('RESPONSE');
+              ev.changePoints.push({
+                substep:physicsSubstepCounter,reason:reason.join('+'),
+                partIds:(info.partIds||[]).slice().sort((a,b)=>a-b),
+                contactWidth:info.span,contactOffset:info.offset,
+                vxBefore:item.vx,vxAfter:item.body.velocity.x,deltaVx,
+                vyBefore:item.vy,vyAfter:item.body.velocity.y,deltaVy,
+                angularBefore:item.omega,angularAfter:item.body.angularVelocity,deltaAngular:deltaOmega,
+                deltaVn:response?response.deltaVn:NaN,deltaVt:response?response.deltaVt:NaN,
+                x:item.body.position.x,angle:item.body.angle,
+                cumulativeDeltaX:item.body.position.x-ev.startX,
+                cumulativeDeltaAngle:item.body.angle-ev.startAngle,
+                contactPoints:response?response.contactCount:0,supportCount:response?response.supportCount:0
+              });
+            }
+            ev.lastPartKey=partKey;ev.lastWidth=info.span;ev.lastOffset=info.offset;
           }
         }else if(plugin.groundContactEventActive){
           finalizeGroundContactHistory(item.body,physicsSubstepCounter-1);

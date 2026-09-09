@@ -2,7 +2,7 @@
 (() => {
   'use strict';
 
-  const VERSION = 'v1.33.7';
+  const VERSION = 'v1.33.8';
   const ASSET_PREFIX = 'assets/';
   const MAX_DISCOVERY = 999;
   const POST_LAND_FRAMES = 60;
@@ -50,13 +50,18 @@
 
   // One row per continuous ground-contact interval. This is the main v1.33.7
   // diagnostic and is intentionally aggregate rather than one row per substep.
-  const contactEventHeader = ['run','piece','event_index','start_substep','end_substep','duration_substeps','part_ids','start_x','end_x','delta_x','start_y','end_y','delta_y','start_angle','end_angle','delta_angle','start_vx','end_vx','delta_vx','start_vy','end_vy','delta_vy','start_angular_velocity','end_angular_velocity','delta_angular_velocity','min_contact_width_px','max_contact_width_px','max_contact_offset_px','max_abs_delta_vx','max_delta_vx_substep','max_delta_vx_width_px','max_delta_vx_offset_px','max_delta_vn','max_delta_vt','max_abs_delta_angular','max_delta_angular_substep','max_abs_delta_vt','sum_abs_delta_vx'];
+  const contactEventHeader = ['run','piece','event_index','start_substep','end_substep','duration_substeps','part_ids','start_x','end_x','delta_x','start_y','end_y','delta_y','start_angle','end_angle','delta_angle','start_vx','end_vx','delta_vx','start_vy','end_vy','delta_vy','start_angular_velocity','end_angular_velocity','delta_angular_velocity','min_contact_width_px','max_contact_width_px','max_contact_offset_px','max_abs_delta_vx','max_delta_vx_substep','max_delta_vx_width_px','max_delta_vx_offset_px','max_delta_vn','max_delta_vt','max_abs_delta_angular','max_delta_angular_substep','max_abs_delta_vt','sum_abs_delta_vx','change_point_count'];
+
+  // Change-point log: only substeps where contact parts, support geometry, or
+  // collision response changes materially. This avoids exporting every substep
+  // while preserving the causal sequence inside long contact events.
+  const contactChangeHeader = ['run','piece','event_index','change_index','substep','reason','part_ids','contact_width_px','contact_offset_px','vx_before','vx_after','delta_vx','vy_before','vy_after','delta_vy','angular_before','angular_after','delta_angular','delta_vn','delta_vt','x','angle','cumulative_delta_x','cumulative_delta_angle','contact_points','support_count'];
 
   const validationHeader = ['run','piece','status','raw_row_count','landing_frame','expected_row_count','row_count_ok','landing_present','post_land_60_ok'];
 
   const state = {
     images: [], run: 1, index: 0, frame: 0, startedAt: 0, landingFrame: null, rows: [], allRows: [], summaries: [],
-    stageW: 390, stageH: 500, baseWidth: 0, piece: null, body: null, running: false, landingContactDetail: null, landingOtherDynamicBodyIds: [], contactEvents: []
+    stageW: 390, stageH: 500, baseWidth: 0, piece: null, body: null, running: false, landingContactDetail: null, landingOtherDynamicBodyIds: [], contactEvents: [], contactChanges: []
   };
 
   async function loadImage(n){
@@ -236,7 +241,9 @@
     const events=p.groundContactEvents||[];
     for(let ei=0;ei<events.length;ei++){
       const e=events[ei];
-      state.contactEvents.push([state.run,state.index+1,ei+1,e.startSubstep,e.endSubstep,e.durationSubsteps,Array.from(e.partIds||[]).join(';'),num(e.startX),num(e.endX),num(e.deltaX),num(e.startY),num(e.endY),num(e.deltaY),num(e.startAngle,6),num(e.endAngle,6),num(e.deltaAngle,6),num(e.startVx,6),num(e.endVx,6),num(e.deltaVx,6),num(e.startVy,6),num(e.endVy,6),num(e.deltaVy,6),num(e.startOmega,6),num(e.endOmega,6),num(e.deltaOmega,6),num(e.minWidth),num(e.maxWidth),num(e.maxOffset),num(e.maxAbsDvx,6),e.maxDvxSubstep,num(e.maxDvxWidth),num(e.maxDvxOffset),num(e.maxDvxVn,6),num(e.maxDvxVt,6),num(e.maxAbsDomega,6),e.maxDomegaSubstep,num(e.maxAbsDvt,6),num(e.totalAbsDvx,6)]);
+      state.contactEvents.push([state.run,state.index+1,ei+1,e.startSubstep,e.endSubstep,e.durationSubsteps,Array.from(e.partIds||[]).join(';'),num(e.startX),num(e.endX),num(e.deltaX),num(e.startY),num(e.endY),num(e.deltaY),num(e.startAngle,6),num(e.endAngle,6),num(e.deltaAngle,6),num(e.startVx,6),num(e.endVx,6),num(e.deltaVx,6),num(e.startVy,6),num(e.endVy,6),num(e.deltaVy,6),num(e.startOmega,6),num(e.endOmega,6),num(e.deltaOmega,6),num(e.minWidth),num(e.maxWidth),num(e.maxOffset),num(e.maxAbsDvx,6),e.maxDvxSubstep,num(e.maxDvxWidth),num(e.maxDvxOffset),num(e.maxDvxVn,6),num(e.maxDvxVt,6),num(e.maxAbsDomega,6),e.maxDomegaSubstep,num(e.maxAbsDvt,6),num(e.totalAbsDvx,6),(e.changePoints||[]).length]);
+      const cps=e.changePoints||[];
+      for(let ci=0;ci<cps.length;ci++){const c=cps[ci];state.contactChanges=state.contactChanges||[];state.contactChanges.push([state.run,state.index+1,ei+1,ci+1,c.substep,c.reason,Array.from(c.partIds||[]).join(';'),num(c.contactWidth),num(c.contactOffset),num(c.vxBefore,6),num(c.vxAfter,6),num(c.deltaVx,6),num(c.vyBefore,6),num(c.vyAfter,6),num(c.deltaVy,6),num(c.angularBefore,6),num(c.angularAfter,6),num(c.deltaAngular,6),num(c.deltaVn,6),num(c.deltaVt,6),num(c.x),num(c.angle,6),num(c.cumulativeDeltaX),num(c.cumulativeDeltaAngle,6),Number(c.contactPoints||0),Number(c.supportCount||0)]);}
     }
     state.summaries.push([
       state.run,state.index+1,status,arr.length,state.landingFrame===null?'':state.landingFrame,state.landingFrame===null?0:Math.max(0,arr.length-state.landingFrame-1),
@@ -303,6 +310,7 @@
     p.body.plugin.maxGroundDeltaVxEventLatched=null;
     p.body.plugin.groundContactEventActive=null;
     p.body.plugin.groundContactEvents=[];
+    p.body.plugin.groundContactEventChangePoints=[];
     Physics.add(p.body); Physics.hold(p.body,x,y,0); Physics.release(p.body);
     state.index=index; state.frame=0; state.startedAt=performance.now(); state.landingFrame=null; state.landingContactDetail=null; state.landingOtherDynamicBodyIds=[]; state.rows=[]; state.piece=p; state.body=p.body;
   }
@@ -405,16 +413,18 @@
     state.running=false; state.piece=null; state.body=null; clearDynamicBodies();
     const meta=metadataRows();
     const files=[{name:'metadata.csv',content:makeCsv(meta.h,meta.rows)},{name:'validation.csv',content:makeCsv(validationHeader,validationRows())}];
-    const CHUNK_PIECES=5, summariesByPiece=new Map(), eventsByPiece=new Map(), rawByPiece=new Map();
+    const CHUNK_PIECES=5, summariesByPiece=new Map(), eventsByPiece=new Map(), changesByPiece=new Map(), rawByPiece=new Map();
     for(const row of state.summaries){const piece=Number(row[1]);if(Number.isInteger(piece)&&piece>0){if(!summariesByPiece.has(piece))summariesByPiece.set(piece,[]);summariesByPiece.get(piece).push(row);}}
     for(const row of state.contactEvents){const piece=Number(row[1]);if(Number.isInteger(piece)&&piece>0){if(!eventsByPiece.has(piece))eventsByPiece.set(piece,[]);eventsByPiece.get(piece).push(row);}}
+    for(const row of (state.contactChanges||[])){const piece=Number(row[1]);if(Number.isInteger(piece)&&piece>0){if(!changesByPiece.has(piece))changesByPiece.set(piece,[]);changesByPiece.get(piece).push(row);}}
     for(const r of state.allRows){const piece=Number(r.split(',')[0]);if(Number.isInteger(piece)&&piece>0){if(!rawByPiece.has(piece))rawByPiece.set(piece,[]);rawByPiece.get(piece).push(r);}}
     for(let start=1;start<=state.images.length;start+=CHUNK_PIECES){
-      const end=Math.min(start+CHUNK_PIECES-1,state.images.length),summaryRows=[],eventRows=[],frameRows=[];
-      for(let piece=start;piece<=end;piece++){summaryRows.push(...(summariesByPiece.get(piece)||[]));eventRows.push(...(eventsByPiece.get(piece)||[]));frameRows.push(...selectCompactFrames(rawByPiece.get(piece)||[]));}
+      const end=Math.min(start+CHUNK_PIECES-1,state.images.length),summaryRows=[],eventRows=[],changeRows=[],frameRows=[];
+      for(let piece=start;piece<=end;piece++){summaryRows.push(...(summariesByPiece.get(piece)||[]));eventRows.push(...(eventsByPiece.get(piece)||[]));changeRows.push(...(changesByPiece.get(piece)||[]));frameRows.push(...selectCompactFrames(rawByPiece.get(piece)||[]));}
       const range=`${pad2(start)}-${pad2(end)}`;
       files.push({name:`summary_${range}.csv`,content:makeCsv(summaryHeader,summaryRows)});
       files.push({name:`contact_events_${range}.csv`,content:makeCsv(contactEventHeader,eventRows)});
+      files.push({name:`contact_changes_${range}.csv`,content:makeCsv(contactChangeHeader,changeRows)});
       files.push({name:`frames_${range}.csv`,content:makeCsv(frameHeader,frameRows)});
     }
     const runFolder=`run${state.run}`; for(const f of files)f.name=`${runFolder}/${f.name}`;
@@ -430,7 +440,7 @@
     const run=prompt(`${VERSION} 自動計測\n今回のRun番号を入力してください（例: 1）`,String(state.run));
     if(run===null) return;
     const n=parseInt(run,10); if(!Number.isInteger(n)||n<1){ alert('Run番号は1以上の整数を入力してください。'); return; }
-    state.run=n; state.index=0;state.frame=0;state.rows=[];state.allRows=[];state.summaries=[];state.contactEvents=[];state.piece=null;state.body=null;state.running=true;
+    state.run=n; state.index=0;state.frame=0;state.rows=[];state.allRows=[];state.summaries=[];state.contactEvents=[];state.contactChanges=[];state.piece=null;state.body=null;state.running=true;
     const modal=$('modeModal'); if(modal) modal.classList.add('hidden');
     const a=$('measurementDownload'); if(a) a.classList.add('hidden');
     const b=$('measurementButton'); if(b)b.disabled=true;
