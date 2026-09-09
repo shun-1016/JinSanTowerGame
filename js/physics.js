@@ -1,4 +1,4 @@
-/* v1.33.5 - ground-contact impulse timing diagnostics / geometric ground-edge contact */
+/* v1.33.6 - ground-contact collision response decomposition diagnostics / geometric ground-edge contact */
 const Physics = (() => {
   const {Engine,World,Bodies,Body,Sleeping}=Matter;
   const SUB_STEPS=4;
@@ -161,6 +161,62 @@ const Physics = (() => {
     return null;
   }
 
+  function getGroundCollisionResponse(body,deltaVx,deltaVy,deltaAngular){
+    if(!ground||!body||body.isStatic)return null;
+    const root=getBodyRoot(body);
+    const pairs=engine.pairs&&engine.pairs.list?engine.pairs.list:[];
+    let pairCount=0,contactCount=0,supportCount=0,depthSum=0,separationSum=0,frictionSum=0,frictionStaticSum=0;
+    let nxSum=0,nySum=0,weightSum=0;
+    let bestDepth=-Infinity,bestSeparation=Infinity,bestPair=null;
+    for(const pair of pairs){
+      if(!pair||!pair.isActive)continue;
+      const a=pair.bodyA,b=pair.bodyB;
+      const aRoot=getBodyRoot(a),bRoot=getBodyRoot(b);
+      const isGroundPair=(a===ground&&bRoot===root)||(b===ground&&aRoot===root);
+      if(!isGroundPair)continue;
+      pairCount++;
+      const contacts=pair.contacts||[];
+      contactCount+=Number(pair.contactCount||contacts.length||0);
+      const supports=pair.collision&&pair.collision.supports?pair.collision.supports:[];
+      supportCount+=supports.length;
+      const c=pair.collision||{};
+      const nx=Number(c.normal&&c.normal.x),ny=Number(c.normal&&c.normal.y);
+      const w=Math.max(1,Number(pair.contactCount||contacts.length||supports.length||1));
+      if(Number.isFinite(nx)&&Number.isFinite(ny)){nxSum+=nx*w;nySum+=ny*w;weightSum+=w;}
+      const depth=Number(c.depth);
+      const separation=Number(c.separation);
+      if(Number.isFinite(depth)){depthSum+=depth*w;if(depth>bestDepth){bestDepth=depth;bestPair=pair;}}
+      if(Number.isFinite(separation)){separationSum+=separation*w;if(separation<bestSeparation)bestSeparation=separation;}
+      const friction=Number(pair.friction),frictionStatic=Number(pair.frictionStatic);
+      if(Number.isFinite(friction))frictionSum+=friction*w;
+      if(Number.isFinite(frictionStatic))frictionStaticSum+=frictionStatic*w;
+    }
+    if(!pairCount)return null;
+    let nx=nxSum,ny=nySum;
+    if(weightSum){const len=Math.hypot(nx,ny)||1;nx/=len;ny/=len;}else{nx=0;ny=1;}
+    const tx=-ny,ty=nx;
+    const deltaVn=deltaVx*nx+deltaVy*ny;
+    const deltaVt=deltaVx*tx+deltaVy*ty;
+    const mass=Number(body.mass);
+    const inertia=Number(body.inertia);
+    return {
+      pairCount,contactCount,supportCount,
+      normalX:nx,normalY:ny,normalAngle:Math.atan2(ny,nx),
+      tangentX:tx,tangentY:ty,
+      depth:bestDepth>-Infinity?bestDepth:NaN,
+      meanDepth:weightSum?depthSum/weightSum:NaN,
+      minSeparation:bestSeparation<Infinity?bestSeparation:NaN,
+      meanSeparation:weightSum?separationSum/weightSum:NaN,
+      friction:weightSum?frictionSum/weightSum:NaN,
+      frictionStatic:weightSum?frictionStaticSum/weightSum:NaN,
+      deltaVn,deltaVt,
+      linearImpulseNormalProxy:Number.isFinite(mass)?mass*deltaVn:NaN,
+      linearImpulseTangentProxy:Number.isFinite(mass)?mass*deltaVt:NaN,
+      angularImpulseProxy:Number.isFinite(inertia)?inertia*deltaAngular:NaN,
+      sourcePairId:bestPair&&bestPair.id!==undefined?bestPair.id:''
+    };
+  }
+
   function suppressNarrowLandingTorque(body,beforeAngularVelocity){
     body.plugin=body.plugin||{};
     const info=getGroundContactInfo(body);
@@ -241,6 +297,7 @@ const Physics = (() => {
           const deltaVx=item.body.velocity.x-item.vx;
           const deltaVy=item.body.velocity.y-item.vy;
           const deltaOmega=item.body.angularVelocity-item.omega;
+          const response=getGroundCollisionResponse(item.body,deltaVx,deltaVy,deltaOmega);
           const event={
             substep:physicsSubstepCounter,
             vxBefore:item.vx,vxAfter:item.body.velocity.x,deltaVx,
@@ -248,7 +305,8 @@ const Physics = (() => {
             angularBefore:item.omega,angularAfter:item.body.angularVelocity,deltaAngular:deltaOmega,
             xBefore:item.x,xAfter:item.body.position.x,deltaX:item.body.position.x-item.x,
             yBefore:item.y,yAfter:item.body.position.y,deltaY:item.body.position.y-item.y,
-            contactWidth:info.span,contactOffset:info.offset,contactSource:info.source
+            contactWidth:info.span,contactOffset:info.offset,contactSource:info.source,
+            response:response||null
           };
           if(!plugin.firstGroundContactEventLatched){
             plugin.firstGroundContactEventLatched=true;

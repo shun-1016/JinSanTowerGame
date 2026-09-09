@@ -1,8 +1,8 @@
-/* v1.33.5 - ground-contact impulse timing diagnostics / modal version ownership */
+/* v1.33.6 - ground-contact collision response decomposition diagnostics / modal version ownership */
 (() => {
   'use strict';
 
-  const VERSION = 'v1.33.5';
+  const VERSION = 'v1.33.6';
   const ASSET_PREFIX = 'assets/';
   const MAX_DISCOVERY = 999;
   const POST_LAND_FRAMES = 60;
@@ -50,7 +50,15 @@
     'first_ground_contact_angular_before','first_ground_contact_angular_after','first_ground_contact_delta_angular',
     'first_ground_contact_delta_x','first_ground_contact_delta_y','first_ground_contact_width_px','first_ground_contact_offset_px','first_ground_contact_source',
     'max_ground_delta_vx','max_ground_delta_vx_before','max_ground_delta_vx_after','max_ground_delta_vy','max_ground_delta_angular',
-    'max_ground_delta_vx_substep','max_ground_delta_vx_contact_width_px','max_ground_delta_vx_contact_offset_px','max_ground_delta_vx_contact_source'
+    'max_ground_delta_vx_substep','max_ground_delta_vx_contact_width_px','max_ground_delta_vx_contact_offset_px','max_ground_delta_vx_contact_source',
+    'first_ground_response_normal_x','first_ground_response_normal_y','first_ground_response_normal_angle_rad','first_ground_response_tangent_x','first_ground_response_tangent_y',
+    'first_ground_response_depth','first_ground_response_separation','first_ground_response_friction','first_ground_response_friction_static',
+    'first_ground_response_delta_vn','first_ground_response_delta_vt','first_ground_response_linear_impulse_normal_proxy','first_ground_response_linear_impulse_tangent_proxy','first_ground_response_angular_impulse_proxy',
+    'first_ground_response_pair_count','first_ground_response_contact_count','first_ground_response_support_count',
+    'max_ground_response_normal_x','max_ground_response_normal_y','max_ground_response_normal_angle_rad','max_ground_response_tangent_x','max_ground_response_tangent_y',
+    'max_ground_response_depth','max_ground_response_separation','max_ground_response_friction','max_ground_response_friction_static',
+    'max_ground_response_delta_vn','max_ground_response_delta_vt','max_ground_response_linear_impulse_normal_proxy','max_ground_response_linear_impulse_tangent_proxy','max_ground_response_angular_impulse_proxy',
+    'max_ground_response_pair_count','max_ground_response_contact_count','max_ground_response_support_count'
   ];
 
   const validationHeader = ['run','piece','status','raw_row_count','landing_frame','expected_row_count','row_count_ok','landing_present','post_land_60_ok'];
@@ -200,6 +208,16 @@
   function colIndex(name){ return csvHeader.indexOf(name); }
   function nums(arr,name){ const i=colIndex(name); return arr.map(a=>Number(a[i])).filter(Number.isFinite); }
 
+  function responseSummary(r,prefix){
+    if(!r) return Array(18).fill('');
+    return [
+      num(r.normalX,6),num(r.normalY,6),num(r.normalAngle,6),num(r.tangentX,6),num(r.tangentY,6),
+      num(r.depth,6),num(r.minSeparation,6),num(r.friction,6),num(r.frictionStatic,6),
+      num(r.deltaVn,6),num(r.deltaVt,6),num(r.linearImpulseNormalProxy,6),num(r.linearImpulseTangentProxy,6),num(r.angularImpulseProxy,6),
+      Number(r.pairCount||0),Number(r.contactCount||0),Number(r.supportCount||0),r.sourcePairId||''
+    ];
+  }
+
   function finishPiece(status){
     const p=state.body&&state.body.plugin?state.body.plugin:{};
     const arr=parseRows(state.rows); const first=arr[0]||[]; const land=state.landingFrame===null?arr[0]:arr[Math.min(state.landingFrame,Math.max(0,arr.length-1))]||arr[0];
@@ -256,7 +274,9 @@
       p.maxGroundDeltaVxEventLatched ? p.maxGroundDeltaVxEventLatched.substep : '',
       p.maxGroundDeltaVxEventLatched ? num(p.maxGroundDeltaVxEventLatched.contactWidth) : '',
       p.maxGroundDeltaVxEventLatched ? num(p.maxGroundDeltaVxEventLatched.contactOffset) : '',
-      p.maxGroundDeltaVxEventLatched ? p.maxGroundDeltaVxEventLatched.contactSource : ''
+      p.maxGroundDeltaVxEventLatched ? p.maxGroundDeltaVxEventLatched.contactSource : '',
+      ...(p.firstGroundContactEventLatched&&p.firstGroundContactEvent&&p.firstGroundContactEvent.response ? responseSummary(p.firstGroundContactEvent.response,'') : responseSummary(null,'')),
+      ...(p.maxGroundDeltaVxEventLatched&&p.maxGroundDeltaVxEventLatched.response ? responseSummary(p.maxGroundDeltaVxEventLatched.response,'') : responseSummary(null,''))
     ]);
     state.allRows.push(...state.rows);
   }
