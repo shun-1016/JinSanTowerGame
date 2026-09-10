@@ -2,7 +2,7 @@
 (() => {
   'use strict';
 
-  const VERSION = 'v1.35.1';
+  const VERSION = 'v1.34.1';
   const ASSET_PREFIX = 'assets/';
   const MAX_DISCOVERY = 999;
   const POST_LAND_FRAMES = 60;
