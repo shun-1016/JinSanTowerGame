@@ -7,29 +7,6 @@ const Physics = (() => {
   engine.gravity.x=0;engine.gravity.y=1;engine.gravity.scale=0.001;
   const world=engine.world; let ground=null,sideWalls=[];
 
-  // v1.35.2 experiment: keep the physical alpha-derived geometry and all
-  // baseline solver/material parameters, but disable Matter's friction impulse
-  // specifically for piece↔ground contacts.  Normal collision response remains
-  // unchanged. This isolates whether ground tangential friction is the source
-  // of the long-term horizontal/rotational drift.
-  const GROUND_FRICTION_CONTROL=true;
-  const originalPairFriction=new Map();
-  function applyGroundFrictionControl(){
-    if(!GROUND_FRICTION_CONTROL) return;
-    for(const pair of engine.pairs.list||[]){
-      if(!pair||!pair.isActive) continue;
-      const a=pair.bodyA&&pair.bodyA.parent?pair.bodyA.parent:pair.bodyA;
-      const b=pair.bodyB&&pair.bodyB.parent?pair.bodyB.parent:pair.bodyB;
-      const ga=pair.bodyA&&pair.bodyA.label==='ground' || a&&a.label==='ground';
-      const gb=pair.bodyB&&pair.bodyB.label==='ground' || b&&b.label==='ground';
-      if(!((ga&&!gb)||(gb&&!ga))) continue;
-      if(!originalPairFriction.has(pair.id)) originalPairFriction.set(pair.id,pair.friction);
-      pair.friction=0;
-    }
-  }
-  Matter.Events.on(engine,'beforeSolve',applyGroundFrictionControl);
-
-
   function setup(width,groundY,baseWidth=width,isEndless=false){
     physicsSubstepCounter=0;
     if(ground) World.remove(world,ground);

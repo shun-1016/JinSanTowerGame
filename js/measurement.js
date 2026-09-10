@@ -1,8 +1,8 @@
-/* v1.33.6 - ground-contact collision response decomposition diagnostics / modal version ownership */
+/* v1.36.0 - debug flow automation / ZIP log export */
 (() => {
   'use strict';
 
-  const VERSION = 'v1.34.1';
+  const VERSION = 'v1.36.0';
   const ASSET_PREFIX = 'assets/';
   const MAX_DISCOVERY = 999;
   const POST_LAND_FRAMES = 60;
@@ -428,10 +428,29 @@
       files.push({name:`frames_${range}.csv`,content:makeCsv(frameHeader,frameRows)});
     }
     const runFolder=`run${state.run}`; for(const f of files)f.name=`${runFolder}/${f.name}`;
-    const blob=zip(files),url=URL.createObjectURL(blob),a=$('measurementDownload');
-    if(a){a.href=url;a.download=`JinSanTowerGame_${VERSION}_run${state.run}_diagnostics.zip`;a.textContent=`${VERSION} 計測ZIPを保存`;a.classList.remove('hidden');a.style.display='block';try{const auto=document.createElement('a');auto.href=url;auto.download=a.download;auto.style.display='none';document.body.appendChild(auto);auto.click();auto.remove();}catch(e){}}
+    const blob=zip(files),url=URL.createObjectURL(blob),fileName=`JinSanTowerGame_${VERSION}_run${state.run}_diagnostics.zip`,a=$('measurementDownload');
+    if(a){a.href=url;a.download=fileName;a.textContent=`${VERSION} 計測ZIPを保存`;a.classList.remove('hidden');a.style.display='block';try{const auto=document.createElement('a');auto.href=url;auto.download=fileName;auto.style.display='none';document.body.appendChild(auto);auto.click();auto.remove();}catch(e){}}
+    // iPhone/iPad: share the generated ZIP directly to the iOS Share Sheet.
+    // A Shortcuts share action can then upload the file to GitHub without exposing a token to the game.
+    let share=$('measurementShare');
+    if(!share){
+      share=document.createElement('button'); share.id='measurementShare'; share.type='button';
+      share.textContent='ZIPを共有（iPhone）'; share.style.display='block'; share.style.marginTop='8px';
+      const parent=a&&a.parentElement ? a.parentElement : $('measurementStatus')?.parentElement;
+      if(parent) parent.appendChild(share);
+    }
+    share.onclick=async()=>{
+      try{
+        const file=new File([blob],fileName,{type:'application/zip'});
+        if(!navigator.share || !navigator.canShare || !navigator.canShare({files:[file]})){
+          alert('このブラウザではZIPの共有に対応していません。下の「計測ZIPを保存」からFilesへ保存してください。'); return;
+        }
+        await navigator.share({title:`${VERSION} Run ${state.run} 計測ログ`,text:`${fileName}`,files:[file]});
+        const ss=$('measurementStatus'); if(ss) ss.textContent='共有シートを終了しました。ショートカットを選択した場合はGitHubへの保存処理が続きます。';
+      }catch(e){ if(e&&e.name!=='AbortError') alert(`ZIP共有に失敗しました: ${e.message||e}`); }
+    };
     const b=$('measurementButton');if(b){b.disabled=false;b.textContent='全ピース自動計測';}
-    setStatus(`${VERSION} 計測完了（${state.images.length}ピース / run ${state.run}）`); const ss=$('measurementStatus');if(ss)ss.textContent=`完了。run ${state.run} のZIPを保存してください。CSVは5ピース単位に分割しています。`;
+    setStatus(`${VERSION} 計測完了（${state.images.length}ピース / run ${state.run}）`); const ss=$('measurementStatus');if(ss)ss.textContent=`完了。ZIPは自動保存され、iPhoneでは「ZIPを共有（iPhone）」からショートカットへ渡せます。`;
     const modal=$('modeModal');if(modal)modal.classList.remove('hidden');const normal=$('normalModeButton');if(normal)normal.disabled=false;const endless=$('endlessModeButton');if(endless)endless.disabled=false;
   }
 
