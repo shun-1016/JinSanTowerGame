@@ -1,8 +1,8 @@
-/* v1.35.0 - sleeping disabled experiment */
+/* v1.35.1 - all-in stability experiment */
 const Physics = (() => {
   const {Engine,World,Bodies,Body,Sleeping}=Matter;
   const SUB_STEPS=4;
-  const engine=Engine.create({enableSleeping:false,positionIterations:12,velocityIterations:8,constraintIterations:2});
+  const engine=Engine.create({enableSleeping:true,positionIterations:20,velocityIterations:12,constraintIterations:4});
   let physicsSubstepCounter=0;
   engine.gravity.x=0;engine.gravity.y=1;engine.gravity.scale=0.001;
   const world=engine.world; let ground=null,sideWalls=[];
