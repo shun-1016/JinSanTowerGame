@@ -1,4 +1,4 @@
-/* v1.34.1 - fixed intermediate Compound Body construction */
+/* v1.34.2 - up to 3-triangle intermediate Compound Body construction */
 const Physics = (() => {
   const {Engine,World,Bodies,Body,Sleeping}=Matter;
   const SUB_STEPS=4;
@@ -67,35 +67,78 @@ const Physics = (() => {
   function mergeRegionPolys(regions){
     let polys=regions.map(r=>r.map(p=>({x:p.x,y:p.y}))),changed=true;while(changed){changed=false;outer:for(let i=0;i<polys.length;i++)for(let j=i+1;j<polys.length;j++){const a=polys[i],b=polys[j];let shared=false;for(let ai=0;ai<a.length&&!shared;ai++){const a1=a[ai],a2=a[(ai+1)%a.length];for(let bj=0;bj<b.length;bj++){if(samePointExact(a1,b[(bj+1)%b.length])&&samePointExact(a2,b[bj])){shared=true;break;}}}if(!shared)continue;const merged=mergeTwoConvexPolys(a,b);if(!merged)continue;polys[i]=merged;polys.splice(j,1);changed=true;break outer;}}return polys;
   }
-  // v1.34.1: fixed intermediate Compound Body construction.
-  // Each alpha-derived triangle may participate in at most one convex merge.
-  // Pairs are selected globally by the simplest valid merged polygon, so the
-  // result is deterministic and does not depend on the input triangle order.
-  // No geometry is added: every Physics Part remains an exact union of source
-  // triangles, and transparent regions are never filled.
+  // v1.34.2: fixed intermediate Compound Body construction with groups of up to
+  // three adjacent alpha-derived triangles. Candidate groups are evaluated
+  // globally, and each source triangle may participate in only one selected
+  // group. No geometry is added: every Physics Part is an exact union of its
+  // source triangles, so transparent regions and holes remain untouched.
   function convexDecomposeIntermediate(triangles){
     const polys=triangles.map(t=>t.map(p=>({x:p.x,y:p.y})));
-    const used=new Set();
-    const result=[];
-    const candidates=[];
-    for(let i=0;i<polys.length;i++)for(let j=i+1;j<polys.length;j++){
-      const a=polys[i],b=polys[j];let shared=false;
-      for(let ai=0;ai<a.length&&!shared;ai++){
+    const adjacency=Array.from({length:polys.length},()=>new Set());
+    const pairMerged=new Map();
+    const pairKey=(i,j)=>i<j?`${i}:${j}`:`${j}:${i}`;
+    const areAdjacent=(a,b)=>{
+      for(let ai=0;ai<a.length;ai++){
         const a1=a[ai],a2=a[(ai+1)%a.length];
         for(let bj=0;bj<b.length;bj++){
-          if(samePointExact(a1,b[(bj+1)%b.length])&&samePointExact(a2,b[bj])){shared=true;break;}
+          if(samePointExact(a1,b[(bj+1)%b.length])&&samePointExact(a2,b[bj]))return true;
         }
       }
-      if(!shared)continue;
-      const merged=mergeTwoConvexPolys(a,b);if(!merged)continue;
-      const perimeter=merged.reduce((sum,q,k)=>sum+Math.hypot(q.x-merged[(k+1)%merged.length].x,q.y-merged[(k+1)%merged.length].y),0);
-      const score=merged.length*100000+perimeter;
-      candidates.push({i,j,merged,score});
+      return false;
+    };
+    const mergePair=(i,j)=>{
+      const key=pairKey(i,j);
+      if(pairMerged.has(key))return pairMerged.get(key);
+      const merged=areAdjacent(polys[i],polys[j])?mergeTwoConvexPolys(polys[i],polys[j]):null;
+      pairMerged.set(key,merged);
+      return merged;
+    };
+    for(let i=0;i<polys.length;i++)for(let j=i+1;j<polys.length;j++){
+      if(areAdjacent(polys[i],polys[j])){adjacency[i].add(j);adjacency[j].add(i);}
     }
-    candidates.sort((a,b)=>a.score-b.score||a.i-b.i||a.j-b.j);
+
+    const candidates=[];
+    // Pair candidates remain available as the fallback for regions where no
+    // valid 3-triangle convex union exists.
+    for(let i=0;i<polys.length;i++)for(const j of adjacency[i])if(i<j){
+      const merged=mergePair(i,j);if(!merged)continue;
+      const perimeter=merged.reduce((sum,q,k)=>sum+Math.hypot(q.x-merged[(k+1)%merged.length].x,q.y-merged[(k+1)%merged.length].y),0);
+      candidates.push({ids:[i,j],merged,groupSize:2,score:merged.length*100000+perimeter});
+    }
+
+    // Enumerate connected triples. A triple is eligible when at least two of
+    // its source triangles are adjacent and the third is adjacent to one of
+    // them; the exact union is accepted only when it remains convex.
+    for(let i=0;i<polys.length;i++){
+      for(const j of adjacency[i]){
+        if(j<=i)continue;
+        const neighbors=new Set([...adjacency[i],...adjacency[j]]);
+        for(const k of neighbors){
+          if(k===i||k===j)continue;
+          if(!(adjacency[i].has(k)||adjacency[j].has(k)))continue;
+          const ij=mergePair(i,j),ik=mergePair(i,k),jk=mergePair(j,k);
+          let merged=null;
+          if(ij&&adjacency[i].has(k))merged=mergeTwoConvexPolys(ij,polys[k]);
+          if(!merged&&ik&&adjacency[j].has(k))merged=mergeTwoConvexPolys(ik,polys[j]);
+          if(!merged&&jk&&adjacency[i].has(k))merged=mergeTwoConvexPolys(jk,polys[i]);
+          if(!merged)continue;
+          const perimeter=merged.reduce((sum,q,m)=>sum+Math.hypot(q.x-merged[(m+1)%merged.length].x,q.y-merged[(m+1)%merged.length].y),0);
+          const ids=[i,j,k].sort((a,b)=>a-b);
+          candidates.push({ids,merged,groupSize:3,score:merged.length*100000+perimeter});
+        }
+      }
+    }
+
+    // Minimize the number of Parts first. This deliberately prefers a valid
+    // 3-triangle union over a 2-triangle union when both compete for the same
+    // triangles; polygon simplicity/perimeter then breaks ties. Thus the
+    // experiment changes only the allowed group size, not the physical shape.
+    candidates.sort((a,b)=>b.groupSize-a.groupSize||a.score-b.score||a.ids.join(',').localeCompare(b.ids.join(',')));
+    const used=new Set(),result=[];
     for(const c of candidates){
-      if(used.has(c.i)||used.has(c.j))continue;
-      used.add(c.i);used.add(c.j);result.push(c.merged);
+      if(c.ids.some(id=>used.has(id)))continue;
+      c.ids.forEach(id=>used.add(id));
+      result.push(c.merged);
     }
     for(let i=0;i<polys.length;i++)if(!used.has(i))result.push(polys[i]);
     return result;
