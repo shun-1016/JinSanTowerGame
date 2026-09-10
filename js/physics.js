@@ -1,8 +1,8 @@
-/* v1.34.3 - shape-aware intermediate Compound Body construction */
+/* v1.35.0 - sleeping disabled experiment */
 const Physics = (() => {
   const {Engine,World,Bodies,Body,Sleeping}=Matter;
   const SUB_STEPS=4;
-  const engine=Engine.create({enableSleeping:true,positionIterations:12,velocityIterations:8,constraintIterations:2});
+  const engine=Engine.create({enableSleeping:false,positionIterations:12,velocityIterations:8,constraintIterations:2});
   let physicsSubstepCounter=0;
   engine.gravity.x=0;engine.gravity.y=1;engine.gravity.scale=0.001;
   const world=engine.world; let ground=null,sideWalls=[];
@@ -67,34 +67,17 @@ const Physics = (() => {
   function mergeRegionPolys(regions){
     let polys=regions.map(r=>r.map(p=>({x:p.x,y:p.y}))),changed=true;while(changed){changed=false;outer:for(let i=0;i<polys.length;i++)for(let j=i+1;j<polys.length;j++){const a=polys[i],b=polys[j];let shared=false;for(let ai=0;ai<a.length&&!shared;ai++){const a1=a[ai],a2=a[(ai+1)%a.length];for(let bj=0;bj<b.length;bj++){if(samePointExact(a1,b[(bj+1)%b.length])&&samePointExact(a2,b[bj])){shared=true;break;}}}if(!shared)continue;const merged=mergeTwoConvexPolys(a,b);if(!merged)continue;polys[i]=merged;polys.splice(j,1);changed=true;break outer;}}return polys;
   }
-  // v1.34.3: fixed intermediate Compound Body construction with shape-aware
-  // selection of two-triangle merges. The number of source triangles per Part
-  // remains exactly the same as v1.34.1 (maximum 2); only which adjacent pairs
-  // are selected is changed. No geometry is added or modified.
+  // v1.34.1: fixed intermediate Compound Body construction.
+  // Each alpha-derived triangle may participate in at most one convex merge.
+  // Pairs are selected globally by the simplest valid merged polygon, so the
+  // result is deterministic and does not depend on the input triangle order.
+  // No geometry is added: every Physics Part remains an exact union of source
+  // triangles, and transparent regions are never filled.
   function convexDecomposeIntermediate(triangles){
     const polys=triangles.map(t=>t.map(p=>({x:p.x,y:p.y})));
     const used=new Set();
     const result=[];
     const candidates=[];
-
-    function polygonMetrics(poly){
-      const a=Math.max(0.05,Math.abs(area(poly)));
-      let minX=Infinity,maxX=-Infinity,minY=Infinity,maxY=-Infinity,perimeter=0;
-      for(let i=0;i<poly.length;i++){
-        const p=poly[i],q=poly[(i+1)%poly.length];
-        minX=Math.min(minX,p.x);maxX=Math.max(maxX,p.x);
-        minY=Math.min(minY,p.y);maxY=Math.max(maxY,p.y);
-        perimeter+=Math.hypot(p.x-q.x,p.y-q.y);
-      }
-      const bw=Math.max(0.5,maxX-minX),bh=Math.max(0.5,maxY-minY);
-      const aspect=Math.max(bw,bh)/Math.min(bw,bh);
-      // Isoperimetric-style compactness: 1 is a circle, larger values are
-      // progressively less compact. This is used only to choose a partition.
-      const compactness=(perimeter*perimeter)/(4*Math.PI*a);
-      return {area:a,aspect,compactness,perimeter,vertices:poly.length};
-    }
-
-    const totalArea=Math.max(0.05,polys.reduce((sum,poly)=>sum+Math.abs(area(poly)),0));
     for(let i=0;i<polys.length;i++)for(let j=i+1;j<polys.length;j++){
       const a=polys[i],b=polys[j];let shared=false;
       for(let ai=0;ai<a.length&&!shared;ai++){
@@ -105,14 +88,9 @@ const Physics = (() => {
       }
       if(!shared)continue;
       const merged=mergeTwoConvexPolys(a,b);if(!merged)continue;
-      const m=polygonMetrics(merged);
-      const areaRatio=m.area/totalArea;
-      // v1.34.1 used vertex count, then perimeter. v1.34.3 instead prefers
-      // compact, non-slender Parts, while keeping perimeter/vertex count as
-      // deterministic tie-breakers. The area term mildly discourages extremely
-      // tiny merged Parts without imposing an arbitrary minimum size.
-      const score=m.aspect*100000 + m.compactness*10000 + (1/Math.sqrt(Math.max(1e-6,areaRatio)))*100 + m.vertices*10 + m.perimeter;
-      candidates.push({i,j,merged,score,metrics:m});
+      const perimeter=merged.reduce((sum,q,k)=>sum+Math.hypot(q.x-merged[(k+1)%merged.length].x,q.y-merged[(k+1)%merged.length].y),0);
+      const score=merged.length*100000+perimeter;
+      candidates.push({i,j,merged,score});
     }
     candidates.sort((a,b)=>a.score-b.score||a.i-b.i||a.j-b.j);
     for(const c of candidates){
