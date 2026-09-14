@@ -36,15 +36,12 @@ jobs:
       - name: Extract ZIP
         run: |
           ZIP_FILE="${{ steps.find_zip.outputs.ZIP_FILE }}"
-
           VERSION_DIR=$(dirname "$ZIP_FILE")
-          ZIP_NAME=$(basename "$ZIP_FILE" .zip)
 
           echo "ZIP: $ZIP_FILE"
-          echo "Destination: $VERSION_DIR/$ZIP_NAME"
+          echo "Destination: $VERSION_DIR"
 
-          mkdir -p "$VERSION_DIR/$ZIP_NAME"
-          unzip -o "$ZIP_FILE" -d "$VERSION_DIR/$ZIP_NAME"
+          unzip -o "$ZIP_FILE" -d "$VERSION_DIR"
 
       - name: Commit extracted CSV files
         run: |
