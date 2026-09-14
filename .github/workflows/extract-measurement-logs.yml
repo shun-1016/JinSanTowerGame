@@ -7,6 +7,8 @@ on:
     paths:
       - 'log/**/*.zip'
 
+  workflow_dispatch:
+
 permissions:
   contents: write
 
@@ -18,10 +20,10 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Find newly uploaded ZIP
+      - name: Find measurement log ZIP
         id: find_zip
         run: |
-          ZIP_FILE=$(git diff-tree --no-commit-id --name-only -r "$GITHUB_SHA" -- 'log/**/*.zip' | head -n 1)
+          ZIP_FILE=$(find log -type f -name '*.zip' | sort | tail -n 1)
 
           if [ -z "$ZIP_FILE" ]; then
             echo "No ZIP file found."
