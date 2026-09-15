@@ -2,7 +2,7 @@
 (() => {
   'use strict';
 
-  const VERSION = 'v1.36.0';
+  const VERSION = 'v1.37.0';
   const ASSET_PREFIX = 'assets/';
   const MAX_DISCOVERY = 999;
   const POST_LAND_FRAMES = 60;
@@ -37,7 +37,7 @@
     'max_post_land_abs_vx','max_post_land_abs_vy','max_post_land_abs_angular_velocity','post_land_x_range','post_land_y_range','post_land_angle_range','max_bounce_height_px','sleep_frame','final_sleeping','final_ground_contact',
     'physics_parts','triangles','regions','raw_regions','contour_vertices','landing_contact_left_offset_px','landing_contact_right_offset_px','landing_contact_normal_angle_rad','landing_contact_torque_proxy',
     'landing_contact_parts_detail','landing_contact_offsets_xy_px','landing_contact_torque_proxies',
-    'narrow_landing_correction_latched','narrow_landing_contact_width_latched_px','narrow_landing_contact_source_latched','narrow_landing_contact_offset_latched_px','narrow_landing_angular_before_latched','narrow_landing_angular_delta_latched','narrow_landing_angular_after_latched','narrow_landing_correction_applied_latched',
+    'narrow_landing_correction_enabled','narrow_landing_correction_latched','narrow_landing_contact_width_latched_px','narrow_landing_contact_source_latched','narrow_landing_contact_offset_latched_px','narrow_landing_angular_before_latched','narrow_landing_angular_delta_latched','narrow_landing_angular_after_latched','narrow_landing_correction_applied_latched',
     'first_ground_contact_substep','first_ground_contact_vx_before','first_ground_contact_vx_after','first_ground_contact_delta_vx','first_ground_contact_vy_before','first_ground_contact_vy_after','first_ground_contact_delta_vy','first_ground_contact_angular_before','first_ground_contact_angular_after','first_ground_contact_delta_angular','first_ground_contact_delta_x','first_ground_contact_delta_y','first_ground_contact_width_px','first_ground_contact_offset_px','first_ground_contact_source',
     'max_ground_delta_vx','max_ground_delta_vx_before','max_ground_delta_vx_after','max_ground_delta_vy','max_ground_delta_angular','max_ground_delta_vx_substep','max_ground_delta_vx_contact_width_px','max_ground_delta_vx_contact_offset_px','max_ground_delta_vx_contact_source',
     'first_ground_response_normal_x','first_ground_response_normal_y','first_ground_response_normal_angle_rad','first_ground_response_tangent_x','first_ground_response_tangent_y','first_ground_response_depth','first_ground_response_separation','first_ground_response_friction','first_ground_response_friction_static','first_ground_response_delta_vn','first_ground_response_delta_vt','first_ground_response_linear_impulse_normal_proxy','first_ground_response_linear_impulse_tangent_proxy','first_ground_response_angular_impulse_proxy','first_ground_response_pair_count','first_ground_response_contact_count','first_ground_response_support_count','first_ground_response_pair_id',
@@ -259,7 +259,7 @@
       (state.landingContactDetail||[]).map(c=>String(c.partId)).join(';'),
       (state.landingContactDetail||[]).map(c=>`${num(c.x)}:${num(c.y)}`).join(';'),
       (state.landingContactDetail||[]).map(c=>num(c.torque,6)).join(';'),
-      num(p.narrowLandingCorrectionLatched,6), num(p.narrowLandingContactSpanLatched), p.narrowLandingContactSourceLatched||'', num(p.narrowLandingContactOffsetLatched), num(p.narrowLandingAngularBeforeLatched,6), num(p.narrowLandingAngularDeltaLatched,6), num(p.narrowLandingAngularAfterLatched,6), p.narrowLandingCorrectionAppliedLatched?1:0,
+      new URLSearchParams(location.search).get('narrowCorrection')!=='off'?1:0, num(p.narrowLandingCorrectionLatched,6), num(p.narrowLandingContactSpanLatched), p.narrowLandingContactSourceLatched||'', num(p.narrowLandingContactOffsetLatched), num(p.narrowLandingAngularBeforeLatched,6), num(p.narrowLandingAngularDeltaLatched,6), num(p.narrowLandingAngularAfterLatched,6), p.narrowLandingCorrectionAppliedLatched?1:0,
       p.firstGroundContactEventLatched&&p.firstGroundContactEvent ? p.firstGroundContactEvent.substep : '',
       p.firstGroundContactEventLatched&&p.firstGroundContactEvent ? num(p.firstGroundContactEvent.vxBefore,6) : '',
       p.firstGroundContactEventLatched&&p.firstGroundContactEvent ? num(p.firstGroundContactEvent.vxAfter,6) : '',

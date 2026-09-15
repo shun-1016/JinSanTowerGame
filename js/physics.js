@@ -135,6 +135,8 @@ const Physics = (() => {
   const GROUND_EDGE_TOLERANCE_PX=2.5;
   const MAX_LANDING_ANGULAR_CORRECTION=0.70;
   const MIN_COLLISION_DELTA_ANGULAR=0.02;
+  // v1.37.0 A/B test: enabled by default; ?narrowCorrection=off disables it.
+  const NARROW_LANDING_CORRECTION_ENABLED=new URLSearchParams(location.search).get('narrowCorrection')!=='off';
 
   function clamp01(v){return Math.max(0,Math.min(1,v));}
   function getBodyRoot(part){return part&&part.parent?part.parent:part;}
@@ -274,6 +276,7 @@ const Physics = (() => {
     body.plugin.narrowLandingCorrection=0;
     body.plugin.narrowLandingCorrectionApplied=false;
     if(!info)return;
+    if(!NARROW_LANDING_CORRECTION_ENABLED)return;
     if(info.span>=NARROW_CONTACT_THRESHOLD_PX)return;
     if(info.offset<=CONTACT_OFFSET_THRESHOLD_PX)return;
     const delta=body.angularVelocity-beforeAngularVelocity;
