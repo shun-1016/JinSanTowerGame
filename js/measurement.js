@@ -1,13 +1,21 @@
-/* v1.36.0 - debug flow automation / ZIP log export */
+/* v1.37.1 - contact-loop diagnostic enhancement / ZIP log export */
 (() => {
   'use strict';
 
-  const VERSION = 'v1.37.0';
+  const VERSION = 'v1.37.1';
   const ASSET_PREFIX = 'assets/';
   const MAX_DISCOVERY = 999;
   const POST_LAND_FRAMES = 60;
   const MAX_FALL_FRAMES = 600;
   const BASE_WIDTH_RATIO = 0.82;
+
+  // v1.37.1: contact-loop diagnostics.
+  // These thresholds are used only to classify already-recorded contact events.
+  // They do not modify Matter.js physics.
+  const LOOP_MIN_GAP_SUBSTEPS = 1;
+  const LOOP_ANGULAR_CHANGE_THRESHOLD = 0.05;
+  const LOOP_LINEAR_CHANGE_THRESHOLD = 0.15;
+  const LOOP_MIN_EVENT_COUNT = 2;
 
   const $ = id => document.getElementById(id);
   const pad2 = n => String(n).padStart(2, '0');
@@ -37,7 +45,7 @@
     'max_post_land_abs_vx','max_post_land_abs_vy','max_post_land_abs_angular_velocity','post_land_x_range','post_land_y_range','post_land_angle_range','max_bounce_height_px','sleep_frame','final_sleeping','final_ground_contact',
     'physics_parts','triangles','regions','raw_regions','contour_vertices','landing_contact_left_offset_px','landing_contact_right_offset_px','landing_contact_normal_angle_rad','landing_contact_torque_proxy',
     'landing_contact_parts_detail','landing_contact_offsets_xy_px','landing_contact_torque_proxies',
-    'narrow_landing_correction_enabled','narrow_landing_correction_latched','narrow_landing_contact_width_latched_px','narrow_landing_contact_source_latched','narrow_landing_contact_offset_latched_px','narrow_landing_angular_before_latched','narrow_landing_angular_delta_latched','narrow_landing_angular_after_latched','narrow_landing_correction_applied_latched',
+    'narrow_landing_correction_latched','narrow_landing_contact_width_latched_px','narrow_landing_contact_source_latched','narrow_landing_contact_offset_latched_px','narrow_landing_angular_before_latched','narrow_landing_angular_delta_latched','narrow_landing_angular_after_latched','narrow_landing_correction_applied_latched',
     'first_ground_contact_substep','first_ground_contact_vx_before','first_ground_contact_vx_after','first_ground_contact_delta_vx','first_ground_contact_vy_before','first_ground_contact_vy_after','first_ground_contact_delta_vy','first_ground_contact_angular_before','first_ground_contact_angular_after','first_ground_contact_delta_angular','first_ground_contact_delta_x','first_ground_contact_delta_y','first_ground_contact_width_px','first_ground_contact_offset_px','first_ground_contact_source',
     'max_ground_delta_vx','max_ground_delta_vx_before','max_ground_delta_vx_after','max_ground_delta_vy','max_ground_delta_angular','max_ground_delta_vx_substep','max_ground_delta_vx_contact_width_px','max_ground_delta_vx_contact_offset_px','max_ground_delta_vx_contact_source',
     'first_ground_response_normal_x','first_ground_response_normal_y','first_ground_response_normal_angle_rad','first_ground_response_tangent_x','first_ground_response_tangent_y','first_ground_response_depth','first_ground_response_separation','first_ground_response_friction','first_ground_response_friction_static','first_ground_response_delta_vn','first_ground_response_delta_vt','first_ground_response_linear_impulse_normal_proxy','first_ground_response_linear_impulse_tangent_proxy','first_ground_response_angular_impulse_proxy','first_ground_response_pair_count','first_ground_response_contact_count','first_ground_response_support_count','first_ground_response_pair_id',
@@ -59,9 +67,30 @@
 
   const validationHeader = ['run','piece','status','raw_row_count','landing_frame','expected_row_count','row_count_ok','landing_present','post_land_60_ok'];
 
+  // One row per re-contact transition. This is intentionally derived from
+  // continuous contact events, so it exposes the sequence:
+  // contact -> separation -> free flight -> re-contact.
+  const contactLoopHeader = [
+    'run','piece','transition_index',
+    'previous_event_index','next_event_index',
+    'previous_end_substep','next_start_substep','gap_substeps',
+    'previous_duration_substeps','next_duration_substeps',
+    'previous_end_x','next_start_x','delta_x_during_gap',
+    'previous_end_y','next_start_y','delta_y_during_gap',
+    'previous_end_angle','next_start_angle','delta_angle_during_gap',
+    'previous_end_vx','next_start_vx','delta_vx_across_gap',
+    'previous_end_vy','next_start_vy','delta_vy_across_gap',
+    'previous_end_angular_velocity','next_start_angular_velocity','delta_angular_across_gap',
+    'next_start_contact_width_px','next_start_contact_offset_px',
+    'previous_max_abs_delta_vx','previous_max_abs_delta_angular',
+    'previous_max_delta_vt',
+    'loop_class',
+    'angular_persistence','linear_persistence'
+  ];
+
   const state = {
     images: [], run: 1, index: 0, frame: 0, startedAt: 0, landingFrame: null, rows: [], allRows: [], summaries: [],
-    stageW: 390, stageH: 500, baseWidth: 0, piece: null, body: null, running: false, landingContactDetail: null, landingOtherDynamicBodyIds: [], contactEvents: [], contactChanges: []
+    stageW: 390, stageH: 500, baseWidth: 0, piece: null, body: null, running: false, landingContactDetail: null, landingOtherDynamicBodyIds: [], contactEvents: [], contactChanges: [], contactLoops: []
   };
 
   async function loadImage(n){
@@ -227,6 +256,54 @@
     ];
   }
 
+  function classifyContactLoop(prev,next,gap){
+    const angularPersistence=Math.abs(Number(next.startOmega)-Number(prev.endOmega))<=LOOP_ANGULAR_CHANGE_THRESHOLD;
+    const linearPersistence=Math.hypot(Number(next.startVx)-Number(prev.endVx),Number(next.startVy)-Number(prev.endVy))<=LOOP_LINEAR_CHANGE_THRESHOLD;
+    const prevAngularImpact=Number(prev.maxAbsDomega)>=LOOP_ANGULAR_CHANGE_THRESHOLD;
+    const prevLinearImpact=Number(prev.maxAbsDvx)>=LOOP_LINEAR_CHANGE_THRESHOLD;
+    if(gap<LOOP_MIN_GAP_SUBSTEPS) return 'ADJACENT_CONTACT_EVENT';
+    if(angularPersistence && prevAngularImpact) return 'ANGULAR_RECONTACT_LOOP';
+    if(linearPersistence && prevLinearImpact) return 'LINEAR_RECONTACT_LOOP';
+    if(prevAngularImpact && prevLinearImpact) return 'MIXED_RECONTACT_LOOP';
+    return 'RECONTACT';
+  }
+
+  function buildContactLoopRows(events){
+    const rows=[];
+    for(let i=1;i<events.length;i++){
+      const prev=events[i-1],next=events[i];
+      const gap=Math.max(0,Number(next.startSubstep)-Number(prev.endSubstep)-1);
+      const deltaX=Number(next.startX)-Number(prev.endX);
+      const deltaY=Number(next.startY)-Number(prev.endY);
+      const deltaAngle=Number(next.startAngle)-Number(prev.endAngle);
+      const deltaVx=Number(next.startVx)-Number(prev.endVx);
+      const deltaVy=Number(next.startVy)-Number(prev.endVy);
+      const deltaOmega=Number(next.startOmega)-Number(prev.endOmega);
+      const angularPersistence=Math.abs(deltaOmega)<=LOOP_ANGULAR_CHANGE_THRESHOLD;
+      const linearPersistence=Math.hypot(deltaVx,deltaVy)<=LOOP_LINEAR_CHANGE_THRESHOLD;
+      rows.push([
+        state.run,state.index+1,i,
+        i,i+1,
+        prev.endSubstep,next.startSubstep,gap,
+        prev.durationSubsteps,next.durationSubsteps,
+        num(prev.endX),num(next.startX),num(deltaX),
+        num(prev.endY),num(next.startY),num(deltaY),
+        num(prev.endAngle,6),num(next.startAngle,6),num(deltaAngle,6),
+        num(prev.endVx,6),num(next.startVx,6),num(deltaVx,6),
+        num(prev.endVy,6),num(next.startVy,6),num(deltaVy,6),
+        num(prev.endOmega,6),num(next.startOmega,6),num(deltaOmega,6),
+        num(next.changePoints?.[0]?.contactWidth),
+        num(next.changePoints?.[0]?.contactOffset),
+        num(prev.maxAbsDvx,6),num(prev.maxAbsDomega,6),
+        num(prev.maxAbsDvt,6),
+        classifyContactLoop(prev,next,gap),
+        angularPersistence?1:0,
+        linearPersistence?1:0
+      ]);
+    }
+    return rows;
+  }
+
   function finishPiece(status){
     if(state.body && Physics.finalizeGroundContactHistory) Physics.finalizeGroundContactHistory(state.body);
     const p=state.body&&state.body.plugin?state.body.plugin:{};
@@ -239,6 +316,8 @@
     const maxBounce=Number.isFinite(landingY)&&Number.isFinite(minY)?Math.max(0,landingY-minY):NaN;
     const firstDiag=first;
     const events=p.groundContactEvents||[];
+    const loopRows=buildContactLoopRows(events);
+    if(loopRows.length) state.contactLoops.push(...loopRows);
     for(let ei=0;ei<events.length;ei++){
       const e=events[ei];
       state.contactEvents.push([state.run,state.index+1,ei+1,e.startSubstep,e.endSubstep,e.durationSubsteps,Array.from(e.partIds||[]).join(';'),num(e.startX),num(e.endX),num(e.deltaX),num(e.startY),num(e.endY),num(e.deltaY),num(e.startAngle,6),num(e.endAngle,6),num(e.deltaAngle,6),num(e.startVx,6),num(e.endVx,6),num(e.deltaVx,6),num(e.startVy,6),num(e.endVy,6),num(e.deltaVy,6),num(e.startOmega,6),num(e.endOmega,6),num(e.deltaOmega,6),num(e.minWidth),num(e.maxWidth),num(e.maxOffset),num(e.maxAbsDvx,6),e.maxDvxSubstep,num(e.maxDvxWidth),num(e.maxDvxOffset),num(e.maxDvxVn,6),num(e.maxDvxVt,6),num(e.maxAbsDomega,6),e.maxDomegaSubstep,num(e.maxAbsDvt,6),num(e.totalAbsDvx,6),(e.changePoints||[]).length]);
@@ -259,7 +338,7 @@
       (state.landingContactDetail||[]).map(c=>String(c.partId)).join(';'),
       (state.landingContactDetail||[]).map(c=>`${num(c.x)}:${num(c.y)}`).join(';'),
       (state.landingContactDetail||[]).map(c=>num(c.torque,6)).join(';'),
-      new URLSearchParams(location.search).get('narrowCorrection')!=='off'?1:0, num(p.narrowLandingCorrectionLatched,6), num(p.narrowLandingContactSpanLatched), p.narrowLandingContactSourceLatched||'', num(p.narrowLandingContactOffsetLatched), num(p.narrowLandingAngularBeforeLatched,6), num(p.narrowLandingAngularDeltaLatched,6), num(p.narrowLandingAngularAfterLatched,6), p.narrowLandingCorrectionAppliedLatched?1:0,
+      num(p.narrowLandingCorrectionLatched,6), num(p.narrowLandingContactSpanLatched), p.narrowLandingContactSourceLatched||'', num(p.narrowLandingContactOffsetLatched), num(p.narrowLandingAngularBeforeLatched,6), num(p.narrowLandingAngularDeltaLatched,6), num(p.narrowLandingAngularAfterLatched,6), p.narrowLandingCorrectionAppliedLatched?1:0,
       p.firstGroundContactEventLatched&&p.firstGroundContactEvent ? p.firstGroundContactEvent.substep : '',
       p.firstGroundContactEventLatched&&p.firstGroundContactEvent ? num(p.firstGroundContactEvent.vxBefore,6) : '',
       p.firstGroundContactEventLatched&&p.firstGroundContactEvent ? num(p.firstGroundContactEvent.vxAfter,6) : '',
@@ -413,18 +492,20 @@
     state.running=false; state.piece=null; state.body=null; clearDynamicBodies();
     const meta=metadataRows();
     const files=[{name:'metadata.csv',content:makeCsv(meta.h,meta.rows)},{name:'validation.csv',content:makeCsv(validationHeader,validationRows())}];
-    const CHUNK_PIECES=5, summariesByPiece=new Map(), eventsByPiece=new Map(), changesByPiece=new Map(), rawByPiece=new Map();
+    const CHUNK_PIECES=5, summariesByPiece=new Map(), eventsByPiece=new Map(), changesByPiece=new Map(), loopsByPiece=new Map(), rawByPiece=new Map();
     for(const row of state.summaries){const piece=Number(row[1]);if(Number.isInteger(piece)&&piece>0){if(!summariesByPiece.has(piece))summariesByPiece.set(piece,[]);summariesByPiece.get(piece).push(row);}}
     for(const row of state.contactEvents){const piece=Number(row[1]);if(Number.isInteger(piece)&&piece>0){if(!eventsByPiece.has(piece))eventsByPiece.set(piece,[]);eventsByPiece.get(piece).push(row);}}
     for(const row of (state.contactChanges||[])){const piece=Number(row[1]);if(Number.isInteger(piece)&&piece>0){if(!changesByPiece.has(piece))changesByPiece.set(piece,[]);changesByPiece.get(piece).push(row);}}
+    for(const row of (state.contactLoops||[])){const piece=Number(row[1]);if(Number.isInteger(piece)&&piece>0){if(!loopsByPiece.has(piece))loopsByPiece.set(piece,[]);loopsByPiece.get(piece).push(row);}}
     for(const r of state.allRows){const piece=Number(r.split(',')[0]);if(Number.isInteger(piece)&&piece>0){if(!rawByPiece.has(piece))rawByPiece.set(piece,[]);rawByPiece.get(piece).push(r);}}
     for(let start=1;start<=state.images.length;start+=CHUNK_PIECES){
-      const end=Math.min(start+CHUNK_PIECES-1,state.images.length),summaryRows=[],eventRows=[],changeRows=[],frameRows=[];
-      for(let piece=start;piece<=end;piece++){summaryRows.push(...(summariesByPiece.get(piece)||[]));eventRows.push(...(eventsByPiece.get(piece)||[]));changeRows.push(...(changesByPiece.get(piece)||[]));frameRows.push(...selectCompactFrames(rawByPiece.get(piece)||[]));}
+      const end=Math.min(start+CHUNK_PIECES-1,state.images.length),summaryRows=[],eventRows=[],changeRows=[],loopRows=[],frameRows=[];
+      for(let piece=start;piece<=end;piece++){summaryRows.push(...(summariesByPiece.get(piece)||[]));eventRows.push(...(eventsByPiece.get(piece)||[]));changeRows.push(...(changesByPiece.get(piece)||[]));loopRows.push(...(loopsByPiece.get(piece)||[]));frameRows.push(...selectCompactFrames(rawByPiece.get(piece)||[]));}
       const range=`${pad2(start)}-${pad2(end)}`;
       files.push({name:`summary_${range}.csv`,content:makeCsv(summaryHeader,summaryRows)});
       files.push({name:`contact_events_${range}.csv`,content:makeCsv(contactEventHeader,eventRows)});
       files.push({name:`contact_changes_${range}.csv`,content:makeCsv(contactChangeHeader,changeRows)});
+      files.push({name:`contact_loops_${range}.csv`,content:makeCsv(contactLoopHeader,loopRows)});
       files.push({name:`frames_${range}.csv`,content:makeCsv(frameHeader,frameRows)});
     }
     const runFolder=`run${state.run}`; for(const f of files)f.name=`${runFolder}/${f.name}`;
@@ -459,7 +540,7 @@
     const run=prompt(`${VERSION} 自動計測\n今回のRun番号を入力してください（例: 1）`,String(state.run));
     if(run===null) return;
     const n=parseInt(run,10); if(!Number.isInteger(n)||n<1){ alert('Run番号は1以上の整数を入力してください。'); return; }
-    state.run=n; state.index=0;state.frame=0;state.rows=[];state.allRows=[];state.summaries=[];state.contactEvents=[];state.contactChanges=[];state.piece=null;state.body=null;state.running=true;
+    state.run=n; state.index=0;state.frame=0;state.rows=[];state.allRows=[];state.summaries=[];state.contactEvents=[];state.contactChanges=[];state.contactLoops=[];state.piece=null;state.body=null;state.running=true;
     const modal=$('modeModal'); if(modal) modal.classList.add('hidden');
     const a=$('measurementDownload'); if(a) a.classList.add('hidden');
     const b=$('measurementButton'); if(b)b.disabled=true;
