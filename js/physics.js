@@ -1,20 +1,72 @@
-/* v1.34.1 - fixed intermediate Compound Body construction */
+/* v1.37.3 - centralized physics tuning constants / contact offset threshold test */
 const Physics = (() => {
   const {Engine,World,Bodies,Body,Sleeping}=Matter;
-  const SUB_STEPS=4;
-  const engine=Engine.create({enableSleeping:true,positionIterations:12,velocityIterations:8,constraintIterations:2});
+
+  // ===== Physics tuning constants =====
+  // Keep tunable physics values in one place so future experiments can change
+  // one parameter at a time without searching through the implementation.
+  const PHYSICS_CONFIG=Object.freeze({
+    subSteps:4,
+    positionIterations:12,
+    velocityIterations:8,
+    constraintIterations:2,
+    gravityX:0,
+    gravityY:1,
+    gravityScale:0.001,
+
+    groundMinWidth:100,
+    groundDepth:28,
+    groundCenterYOffset:14,
+    groundFriction:0.85,
+    groundFrictionStatic:1,
+    groundRestitution:0,
+    sideWallThickness:28,
+    sideWallHeight:2000,
+    sideWallCenterYOffset:0,
+    sideWallFriction:0.8,
+    sideWallFrictionStatic:1,
+    sideWallRestitution:0,
+
+    pieceFriction:0.35,
+    pieceFrictionStatic:0.45,
+    pieceFrictionAir:0.015,
+    pieceRestitution:0,
+    pieceDensity:0.002,
+    pieceSleepThreshold:60,
+    pieceSlop:0.10,
+
+    narrowContactThresholdPx:8,
+    contactOffsetThresholdPx:3,
+    groundEdgeTolerancePx:2.5,
+    maxLandingAngularCorrection:0.70,
+    minCollisionDeltaAngular:0.02,
+    contactOffsetScalePx:12,
+
+    contactChangeDeltaVxThreshold:0.15,
+    contactChangeDeltaOmegaThreshold:0.05,
+    contactChangeDeltaVtThreshold:0.15
+  });
+
+  const engine=Engine.create({
+    enableSleeping:true,
+    positionIterations:PHYSICS_CONFIG.positionIterations,
+    velocityIterations:PHYSICS_CONFIG.velocityIterations,
+    constraintIterations:PHYSICS_CONFIG.constraintIterations
+  });
   let physicsSubstepCounter=0;
-  engine.gravity.x=0;engine.gravity.y=1;engine.gravity.scale=0.001;
+  engine.gravity.x=PHYSICS_CONFIG.gravityX;
+  engine.gravity.y=PHYSICS_CONFIG.gravityY;
+  engine.gravity.scale=PHYSICS_CONFIG.gravityScale;
   const world=engine.world; let ground=null,sideWalls=[];
 
   function setup(width,groundY,baseWidth=width,isEndless=false){
     physicsSubstepCounter=0;
     if(ground) World.remove(world,ground);
     if(sideWalls.length){World.remove(world,sideWalls);sideWalls=[];}
-    const bw=Math.max(100,baseWidth),left=(width-bw)/2,right=left+bw;
-    ground=Bodies.rectangle((left+right)/2,groundY+14,bw,28,{isStatic:true,label:'ground',friction:0.85,frictionStatic:1,restitution:0});
+    const bw=Math.max(PHYSICS_CONFIG.groundMinWidth,baseWidth),left=(width-bw)/2,right=left+bw;
+    ground=Bodies.rectangle((left+right)/2,groundY+PHYSICS_CONFIG.groundCenterYOffset,bw,PHYSICS_CONFIG.groundDepth,{isStatic:true,label:'ground',friction:PHYSICS_CONFIG.groundFriction,frictionStatic:PHYSICS_CONFIG.groundFrictionStatic,restitution:PHYSICS_CONFIG.groundRestitution});
     World.add(world,ground);
-    if(isEndless){const wallH=2000;sideWalls=[Bodies.rectangle(left-14,groundY-wallH/2,28,wallH,{isStatic:true,label:'side-wall',friction:0.8,frictionStatic:1,restitution:0}),Bodies.rectangle(right+14,groundY-wallH/2,28,wallH,{isStatic:true,label:'side-wall',friction:0.8,frictionStatic:1,restitution:0})];World.add(world,sideWalls);}
+    if(isEndless){const wallH=PHYSICS_CONFIG.sideWallHeight,wallXOffset=PHYSICS_CONFIG.sideWallThickness/2;sideWalls=[Bodies.rectangle(left-wallXOffset,groundY+PHYSICS_CONFIG.sideWallCenterYOffset-wallH/2,PHYSICS_CONFIG.sideWallThickness,wallH,{isStatic:true,label:'side-wall',friction:PHYSICS_CONFIG.sideWallFriction,frictionStatic:PHYSICS_CONFIG.sideWallFrictionStatic,restitution:PHYSICS_CONFIG.sideWallRestitution}),Bodies.rectangle(right+wallXOffset,groundY+PHYSICS_CONFIG.sideWallCenterYOffset-wallH/2,PHYSICS_CONFIG.sideWallThickness,wallH,{isStatic:true,label:'side-wall',friction:PHYSICS_CONFIG.sideWallFriction,frictionStatic:PHYSICS_CONFIG.sideWallFrictionStatic,restitution:PHYSICS_CONFIG.sideWallRestitution})];World.add(world,sideWalls);}
   }
   function cross(a,b,c){return (b.x-a.x)*(c.y-a.y)-(b.y-a.y)*(c.x-a.x);}
   function area(poly){let a=0;for(let i=0;i<poly.length;i++){const p=poly[i],q=poly[(i+1)%poly.length];a+=p.x*q.y-q.x*p.y;}return a/2;}
@@ -103,7 +155,7 @@ const Physics = (() => {
   const COMPOUND_MODE='intermediate';
 
   function createPieceBody(x,y,w,h,shape){
-    const options={label:'piece',friction:0.35,frictionStatic:0.45,frictionAir:0.015,restitution:0,density:0.002,sleepThreshold:60,slop:0.10};
+    const options={label:'piece',friction:PHYSICS_CONFIG.pieceFriction,frictionStatic:PHYSICS_CONFIG.pieceFrictionStatic,frictionAir:PHYSICS_CONFIG.pieceFrictionAir,restitution:PHYSICS_CONFIG.pieceRestitution,density:PHYSICS_CONFIG.pieceDensity,sleepThreshold:PHYSICS_CONFIG.pieceSleepThreshold,slop:PHYSICS_CONFIG.pieceSlop};
     const rawRegions=shape&&Array.isArray(shape.regions)?shape.regions:[],regions=rawRegions.length?mergeRegionPolys(rawRegions):[],allTriangles=[];let failed=false,failReason='NONE',failIteration=-1,remainingVertices=0;
     for(const region of regions){const result=triangulateDetailed(region);if(result.diag.failed){failed=true;if(failReason==='NONE')failReason=result.diag.failReason||'REGION_TRIANGULATION_FAILED';failIteration=result.diag.failIteration;remainingVertices=result.diag.remainingVertices;continue;}allTriangles.push(...result.triangles);}
     if(!regions.length&&shape&&shape.contour&&shape.contour.length>=3){const result=triangulateDetailed(shape.contour);if(result.diag.failed){failed=true;failReason=result.diag.failReason||'CONTOUR_TRIANGULATION_FAILED';failIteration=result.diag.failIteration;remainingVertices=result.diag.remainingVertices;}else allTriangles.push(...result.triangles);}
@@ -130,11 +182,6 @@ const Physics = (() => {
   // When a piece lands on an extremely narrow geometric support while the support
   // center is far from the COM, suppress only the collision-generated angular
   // velocity. No piece-ID or asset-count dependency is introduced.
-  const NARROW_CONTACT_THRESHOLD_PX=8;
-  const CONTACT_OFFSET_THRESHOLD_PX=5;
-  const GROUND_EDGE_TOLERANCE_PX=2.5;
-  const MAX_LANDING_ANGULAR_CORRECTION=0.70;
-  const MIN_COLLISION_DELTA_ANGULAR=0.02;
 
   function clamp01(v){return Math.max(0,Math.min(1,v));}
   function getBodyRoot(part){return part&&part.parent?part.parent:part;}
@@ -172,7 +219,7 @@ const Physics = (() => {
       for(let i=0;i<vertices.length;i++){
         const a=vertices[i],b=vertices[(i+1)%vertices.length];
         if(!a||!b)continue;
-        if(Math.abs(a.y-groundTop)<=GROUND_EDGE_TOLERANCE_PX&&Math.abs(b.y-groundTop)<=GROUND_EDGE_TOLERANCE_PX){
+        if(Math.abs(a.y-groundTop)<=PHYSICS_CONFIG.groundEdgeTolerancePx&&Math.abs(b.y-groundTop)<=PHYSICS_CONFIG.groundEdgeTolerancePx){
           edgeSegments.push({a,b});
         }
       }
@@ -268,20 +315,20 @@ const Physics = (() => {
     body.plugin.narrowLandingAngularBefore=beforeAngularVelocity;
     body.plugin.narrowLandingAngularAfter=body.angularVelocity;
     body.plugin.narrowLandingAngularDelta=info?body.angularVelocity-beforeAngularVelocity:NaN;
-    body.plugin.narrowLandingCondition=!!info && info.span<NARROW_CONTACT_THRESHOLD_PX;
-    body.plugin.narrowLandingOffsetCondition=!!info && info.offset>CONTACT_OFFSET_THRESHOLD_PX;
-    body.plugin.narrowLandingDeltaCondition=!!info && Math.abs(body.angularVelocity-beforeAngularVelocity)>=MIN_COLLISION_DELTA_ANGULAR;
+    body.plugin.narrowLandingCondition=!!info && info.span<PHYSICS_CONFIG.narrowContactThresholdPx;
+    body.plugin.narrowLandingOffsetCondition=!!info && info.offset>PHYSICS_CONFIG.contactOffsetThresholdPx;
+    body.plugin.narrowLandingDeltaCondition=!!info && Math.abs(body.angularVelocity-beforeAngularVelocity)>=PHYSICS_CONFIG.minCollisionDeltaAngular;
     body.plugin.narrowLandingCorrection=0;
     body.plugin.narrowLandingCorrectionApplied=false;
     if(!info)return;
-    if(info.span>=NARROW_CONTACT_THRESHOLD_PX)return;
-    if(info.offset<=CONTACT_OFFSET_THRESHOLD_PX)return;
+    if(info.span>=PHYSICS_CONFIG.narrowContactThresholdPx)return;
+    if(info.offset<=PHYSICS_CONFIG.contactOffsetThresholdPx)return;
     const delta=body.angularVelocity-beforeAngularVelocity;
-    if(Math.abs(delta)<MIN_COLLISION_DELTA_ANGULAR)return;
+    if(Math.abs(delta)<PHYSICS_CONFIG.minCollisionDeltaAngular)return;
 
-    const narrowFactor=clamp01((NARROW_CONTACT_THRESHOLD_PX-info.span)/NARROW_CONTACT_THRESHOLD_PX);
-    const offsetFactor=clamp01((info.offset-CONTACT_OFFSET_THRESHOLD_PX)/12);
-    const correction=Math.min(MAX_LANDING_ANGULAR_CORRECTION,narrowFactor*offsetFactor);
+    const narrowFactor=clamp01((PHYSICS_CONFIG.narrowContactThresholdPx-info.span)/PHYSICS_CONFIG.narrowContactThresholdPx);
+    const offsetFactor=clamp01((info.offset-PHYSICS_CONFIG.contactOffsetThresholdPx)/PHYSICS_CONFIG.contactOffsetScalePx);
+    const correction=Math.min(PHYSICS_CONFIG.maxLandingAngularCorrection,narrowFactor*offsetFactor);
     if(correction<=0)return;
 
     const after=beforeAngularVelocity+delta*(1-correction);
@@ -331,8 +378,8 @@ const Physics = (() => {
   }
 
   function step(dt){
-    const totalMs=Math.max(1,Math.min(33,dt*1000)),subDt=totalMs/SUB_STEPS;
-    for(let i=0;i<SUB_STEPS;i++){
+    const totalMs=Math.max(1,Math.min(33,dt*1000)),subDt=totalMs/PHYSICS_CONFIG.subSteps;
+    for(let i=0;i<PHYSICS_CONFIG.subSteps;i++){
       const dynamicBodies=world.bodies.filter(b=>!b.isStatic&&b.label==='piece');
       const before=dynamicBodies.map(body=>({
         body,
@@ -419,7 +466,7 @@ const Physics = (() => {
             const partChanged=partKey!==ev.lastPartKey;
             const widthChanged=Math.abs(info.span-ev.lastWidth)>=1.0;
             const offsetChanged=Math.abs(info.offset-ev.lastOffset)>=2.0;
-            const responseNotable=Math.abs(deltaVx)>=0.15 || Math.abs(deltaOmega)>=0.05 || (response&&Math.abs(response.deltaVt)>=0.15);
+            const responseNotable=Math.abs(deltaVx)>=PHYSICS_CONFIG.contactChangeDeltaVxThreshold || Math.abs(deltaOmega)>=PHYSICS_CONFIG.contactChangeDeltaOmegaThreshold || (response&&Math.abs(response.deltaVt)>=PHYSICS_CONFIG.contactChangeDeltaVtThreshold);
             if(partChanged||widthChanged||offsetChanged||responseNotable){
               const reason=[];
               if(partChanged)reason.push('PART_CHANGE');

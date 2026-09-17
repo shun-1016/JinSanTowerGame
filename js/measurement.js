@@ -1,8 +1,8 @@
-/* v1.37.2 - contact diagnostics refactor / ZIP log export */
+/* v1.37.3 - contact diagnostics refactor / ZIP log export */
 (() => {
   'use strict';
 
-  const VERSION = 'v1.37.2';
+  const VERSION = 'v1.37.3';
   const ASSET_PREFIX = 'assets/';
   const MAX_DISCOVERY = 999;
   const POST_LAND_FRAMES = 60;

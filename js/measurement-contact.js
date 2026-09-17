@@ -1,4 +1,4 @@
-/* v1.37.2 - contact diagnostics module */
+/* v1.37.3 - contact diagnostics module */
 (() => {
   'use strict';
   const api = {};
