@@ -1,8 +1,8 @@
-/* v1.37.1 - contact-loop diagnostic enhancement / ZIP log export */
+/* v1.37.2 - contact diagnostics refactor / ZIP log export */
 (() => {
   'use strict';
 
-  const VERSION = 'v1.37.1';
+  const VERSION = 'v1.37.2';
   const ASSET_PREFIX = 'assets/';
   const MAX_DISCOVERY = 999;
   const POST_LAND_FRAMES = 60;
@@ -44,7 +44,7 @@
     'landing_angle','landing_pre_vx','landing_pre_vy','landing_pre_angular_velocity','landing_vx','landing_vy','landing_angular_velocity','landing_delta_vx','landing_delta_vy','landing_delta_angular_velocity',
     'max_post_land_abs_vx','max_post_land_abs_vy','max_post_land_abs_angular_velocity','post_land_x_range','post_land_y_range','post_land_angle_range','max_bounce_height_px','sleep_frame','final_sleeping','final_ground_contact',
     'physics_parts','triangles','regions','raw_regions','contour_vertices','landing_contact_left_offset_px','landing_contact_right_offset_px','landing_contact_normal_angle_rad','landing_contact_torque_proxy',
-    'landing_contact_parts_detail','landing_contact_offsets_xy_px','landing_contact_torque_proxies',
+    'landing_contact_parts_detail','landing_contact_offsets_xy_px','landing_contact_torque_proxies','landing_contact_world_xy_px','landing_contact_relative_xy_px','landing_contact_normal_xy','landing_contact_omega_cross_r_px_per_frame','landing_contact_point_velocity_px_per_frame',
     'narrow_landing_correction_latched','narrow_landing_contact_width_latched_px','narrow_landing_contact_source_latched','narrow_landing_contact_offset_latched_px','narrow_landing_angular_before_latched','narrow_landing_angular_delta_latched','narrow_landing_angular_after_latched','narrow_landing_correction_applied_latched',
     'first_ground_contact_substep','first_ground_contact_vx_before','first_ground_contact_vx_after','first_ground_contact_delta_vx','first_ground_contact_vy_before','first_ground_contact_vy_after','first_ground_contact_delta_vy','first_ground_contact_angular_before','first_ground_contact_angular_after','first_ground_contact_delta_angular','first_ground_contact_delta_x','first_ground_contact_delta_y','first_ground_contact_width_px','first_ground_contact_offset_px','first_ground_contact_source',
     'max_ground_delta_vx','max_ground_delta_vx_before','max_ground_delta_vx_after','max_ground_delta_vy','max_ground_delta_angular','max_ground_delta_vx_substep','max_ground_delta_vx_contact_width_px','max_ground_delta_vx_contact_offset_px','max_ground_delta_vx_contact_source',
@@ -89,6 +89,7 @@
   ];
 
   const state = {
+    measurementConfig: null,
     images: [], run: 1, index: 0, frame: 0, startedAt: 0, landingFrame: null, rows: [], allRows: [], summaries: [],
     stageW: 390, stageH: 500, baseWidth: 0, piece: null, body: null, running: false, landingContactDetail: null, landingOtherDynamicBodyIds: [], contactEvents: [], contactChanges: [], contactLoops: []
   };
@@ -123,91 +124,9 @@
     Physics.setup(state.stageW,state.stageH-12,state.baseWidth,false);
   }
 
-  function groundContact(body){
-    const pairs=Physics.engine.pairs.list || [];
-    for(const pair of pairs){
-      if(!pair.isActive) continue;
-      const a=pair.bodyA&&pair.bodyA.parent?pair.bodyA.parent:pair.bodyA;
-      const b=pair.bodyB&&pair.bodyB.parent?pair.bodyB.parent:pair.bodyB;
-      if((a===body&&b&&b.label==='ground')||(b===body&&a&&a.label==='ground')) return true;
-    }
-    return false;
-  }
+  function groundContact(body){ return window.JinSanMeasurementContact.groundContact(body); }
 
-  function contactGeometry(body){
-    const r={
-      bottomWidth1:0,bottomWidth2:0,bottomWidth4:0,bottomWidth8:0,
-      contactWidth:0,contactCenterOffset:0,contactPoints:0,contactParts:0,
-      contactMinY:NaN,contactMaxY:NaN,contactMeanY:NaN,
-      contactLeftOffset:NaN,contactRightOffset:NaN,contactSpanFromCom:NaN,
-      contactNormalAngle:NaN,contactTorqueProxy:NaN,contactComDistance:NaN,contactAsymmetry:NaN,
-      contactDetails:[]
-    };
-    const parts=(body.parts||[]).slice(1);
-    if(parts.length){
-      const verts=parts.flatMap(p=>p.vertices||[]);
-      if(verts.length){
-        const maxY=Math.max(...verts.map(v=>v.y));
-        for(const [key,band] of [['bottomWidth1',1],['bottomWidth2',2],['bottomWidth4',4],['bottomWidth8',8]]){
-          const near=verts.filter(v=>v.y>=maxY-band);
-          if(near.length) r[key]=Math.max(...near.map(v=>v.x))-Math.min(...near.map(v=>v.x));
-        }
-      }
-    }
-    const xs=[]; const ys=[]; const ids=new Set(); const normals=[];
-    const groundY=state.stageH-12;
-    for(const pair of Physics.engine.pairs.list||[]){
-      if(!pair.isActive) continue;
-      const a=pair.bodyA,b=pair.bodyB;
-      const ap=a&&a.parent?a.parent:a,bp=b&&b.parent?b.parent:b;
-      const ga=a&&a.label==='ground',gb=b&&b.label==='ground';
-      if(!((ap===body&&gb)||(bp===body&&ga))) continue;
-      const moving=ap===body?a:b; if(moving&&moving.id!==undefined) ids.add(moving.id);
-      const contacts=pair.contacts||[]; const count=Math.min(pair.contactCount||0,contacts.length);
-      for(let i=0;i<count;i++){
-        const c=contacts[i];
-        const v=c&&c.vertex;
-        if(v&&Math.abs(v.y-groundY)<8){
-          xs.push(v.x); ys.push(v.y);
-          const rx=v.x-body.position.x, ry=v.y-body.position.y;
-          let nx=0, ny=1;
-          if(pair.collision&&pair.collision.normal){
-            nx=Number(pair.collision.normal.x); ny=Number(pair.collision.normal.y);
-            normals.push({x:nx,y:ny});
-          }
-          // Compact per-contact record used only in the landing summary.
-          // Keep this out of the per-frame CSV to avoid multiplying log size.
-          r.contactDetails.push({
-            partId:moving&&moving.id!==undefined?moving.id:'',
-            x:rx,y:ry,torque:rx*ny-ry*nx
-          });
-        }
-      }
-    }
-    r.contactPoints=xs.length; r.contactParts=ids.size;
-    if(xs.length){
-      const min=Math.min(...xs),max=Math.max(...xs),mean=xs.reduce((a,b)=>a+b,0)/xs.length;
-      r.contactWidth=max-min;
-      r.contactCenterOffset=(min+max)/2-body.position.x;
-      r.contactLeftOffset=min-body.position.x;
-      r.contactRightOffset=max-body.position.x;
-      r.contactSpanFromCom=Math.max(Math.abs(r.contactLeftOffset),Math.abs(r.contactRightOffset));
-      r.contactAsymmetry=Math.abs(r.contactCenterOffset);
-      r.contactComDistance=Math.hypot(r.contactCenterOffset,0);
-      if(normals.length){
-        const nx=normals.reduce((a,b)=>a+b.x,0)/normals.length;
-        const ny=normals.reduce((a,b)=>a+b.y,0)/normals.length;
-        r.contactNormalAngle=Math.atan2(ny,nx);
-        r.contactTorqueProxy=r.contactCenterOffset*ny;
-      }
-    }
-    if(ys.length){
-      r.contactMinY=Math.min(...ys);
-      r.contactMaxY=Math.max(...ys);
-      r.contactMeanY=ys.reduce((a,b)=>a+b,0)/ys.length;
-    }
-    return r;
-  }
+  function contactGeometry(body){ return window.JinSanMeasurementContact.contactGeometry(body, state.stageH); }
 
   function rowFor(body, phase){
     const p=body.plugin||{}; const d=p.v238Diagnostics||{}; const cg=contactGeometry(body);
@@ -338,6 +257,11 @@
       (state.landingContactDetail||[]).map(c=>String(c.partId)).join(';'),
       (state.landingContactDetail||[]).map(c=>`${num(c.x)}:${num(c.y)}`).join(';'),
       (state.landingContactDetail||[]).map(c=>num(c.torque,6)).join(';'),
+      (state.landingContactDetail||[]).map(c=>`${num(c.worldX)}:${num(c.worldY)}`).join(';'),
+      (state.landingContactDetail||[]).map(c=>`${num(c.relativeX)}:${num(c.relativeY)}`).join(';'),
+      (state.landingContactDetail||[]).map(c=>`${num(c.normalX,6)}:${num(c.normalY,6)}`).join(';'),
+      (state.landingContactDetail||[]).map(c=>`${num(c.omegaCrossRX,6)}:${num(c.omegaCrossRY,6)}`).join(';'),
+      (state.landingContactDetail||[]).map(c=>`${num(c.pointVelocityX,6)}:${num(c.pointVelocityY,6)}`).join(';'),
       num(p.narrowLandingCorrectionLatched,6), num(p.narrowLandingContactSpanLatched), p.narrowLandingContactSourceLatched||'', num(p.narrowLandingContactOffsetLatched), num(p.narrowLandingAngularBeforeLatched,6), num(p.narrowLandingAngularDeltaLatched,6), num(p.narrowLandingAngularAfterLatched,6), p.narrowLandingCorrectionAppliedLatched?1:0,
       p.firstGroundContactEventLatched&&p.firstGroundContactEvent ? p.firstGroundContactEvent.substep : '',
       p.firstGroundContactEventLatched&&p.firstGroundContactEvent ? num(p.firstGroundContactEvent.vxBefore,6) : '',
@@ -551,6 +475,14 @@
   async function init(){
     const params=new URLSearchParams(location.search); if(params.get('debug')!=='on') return;
     const button=$('measurementButton'); if(!button) return;
+    try {
+      const res = await fetch('js/measurement-config.json', { cache: 'no-store' });
+      if (!res.ok) throw new Error('measurement-config.json: HTTP ' + res.status);
+      state.measurementConfig = await res.json();
+    } catch (e) {
+      state.measurementConfig = null;
+      console.warn('[measurement] config load failed; using built-in measurement behavior.', e);
+    }
     // Remove listeners installed by older measurement scripts by replacing the node.
     const clean=button.cloneNode(true); button.replaceWith(clean);
     clean.addEventListener('click',start);
