@@ -34,3 +34,24 @@ v23.5では、物理パラメータ、ピース形状生成、通常モード、
 - 外部ライブラリを追加せず、ゲーム内のデバッグロジックだけでZIPを生成。
 - ZIP 1ファイルとして自動ダウンロードし、必要に応じて画面から再保存可能。
 - 物理計測項目、Matter.js 0.20.0の接触点取得ロジック、物理パラメータは変更なし。
+
+## v1.37.2
+
+### ファイル配置
+- `index.html`：ルート
+- `README.md`：ルート
+- `js/measurement.js`
+- `js/measurement-contact.js`
+- `js/measurement-config.json`
+- `js/physics.js`
+
+`docs/` はデバッグログのアップロード手順やGitHub Actions関連のREADMEを配置する運用のため、v1.37.2では変更しません。
+
+### リファクタリング
+- 接触診断処理を `measurement-contact.js` に分離
+- 計測項目を `measurement-config.json` に辞書化
+- 接触点X/Y、COM相対座標、接触法線、トルクproxy、接触点数、Collision Part等を整理
+- 狭接触時角速度補正本体は維持
+- `?narrowCorrection=on/off` のURL切替は削除
+
+`measurement-contact.js` は `measurement.js` より先に読み込みます。
