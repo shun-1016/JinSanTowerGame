@@ -35,6 +35,16 @@ v23.5では、物理パラメータ、ピース形状生成、通常モード、
 - ZIP 1ファイルとして自動ダウンロードし、必要に応じて画面から再保存可能。
 - 物理計測項目、Matter.js 0.20.0の接触点取得ロジック、物理パラメータは変更なし。
 
+## v1.37.7
+
+- `contact_events.csv` のイベントレベル Solver / Correction / Total 集計ロジックを修正。
+- イベント開始値は最初の接触substepの **Engine.update + 補正後** の状態であるため、そのSTART substepの角速度変化をイベント集計から除外し、イベント開始状態から終了状態までのsubstepだけを累積する方式に変更。
+- これにより `total_delta_angular_velocity` は `end_angular_velocity - start_angular_velocity` と一致することを期待する。
+- `decomposition_residual` と `decomposition_consistent` を追加し、イベント集計の整合性を機械的に確認できるようにした。
+- `solver + correction = total` の関係も維持する。
+- Matter.jsの物理パラメータ、狭接触角速度補正の式・条件、接触判定・イベント分類ロジックは変更しない。
+- 診断ロジックのみの修正。
+
 ## v1.37.6
 
 - v1.37.5で `contact_changes` に記録される solver / correction / total の分解値を、`contact_events` のイベント集計値にも正しく反映。
