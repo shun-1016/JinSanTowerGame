@@ -1,4 +1,4 @@
-/* v1.37.7 - corrected event-level solver/correction angular-velocity diagnostics */
+/* v1.37.8 - contact-event angular ledger diagnostics */
 const Physics = (() => {
   const {Engine,World,Bodies,Body,Sleeping}=Matter;
 
@@ -372,6 +372,9 @@ const Physics = (() => {
     ev.deltaX=ev.endX-ev.startX; ev.deltaY=ev.endY-ev.startY;
     ev.deltaAngle=ev.endAngle-ev.startAngle; ev.deltaVx=ev.endVx-ev.startVx;
     ev.deltaVy=ev.endVy-ev.startVy; ev.deltaOmega=ev.endOmega-ev.startOmega;
+    // v1.37.8: keep both a direct observed angular ledger and the solver/correction ledger.
+    // observedDeltaAngular telescopes from the first post-contact state to the last active-contact state.
+    // Including-start totals are retained separately so the START substep can be diagnosed explicitly.
     // Aggregate decomposition is defined from the latched event-start state
     // (after the START substep) through the last active-contact substep.
     // The START substep is intentionally excluded because its post-correction
@@ -452,6 +455,9 @@ const Physics = (() => {
               maxDvxVn:response?response.deltaVn:NaN,maxDvxVt:response?response.deltaVt:NaN,
               maxAbsDomega:Math.abs(deltaOmega),maxDomega:deltaOmega,maxDomegaSubstep:physicsSubstepCounter,
               sumSolverDeltaAngular:0,sumCorrectionDeltaAngular:0,sumTotalDeltaAngular:0,
+              startPreOmega:item.omega,startSolverDeltaAngular:deltaAngularSolver,startCorrectionDeltaAngular:deltaAngularCorrection,startTotalDeltaAngular:deltaAngularTotal,
+              sumSolverDeltaAngularIncludingStart:deltaAngularSolver,sumCorrectionDeltaAngularIncludingStart:deltaAngularCorrection,sumTotalDeltaAngularIncludingStart:deltaAngularTotal,
+              observedDeltaAngular:0,lastObservedOmega:item.body.angularVelocity,
               maxAbsDvt:response?Math.abs(response.deltaVt):0,totalAbsDvx:Math.abs(deltaVx),
               partIds:new Set(info.partIds||[]),
               lastPartKey:(info.partIds||[]).slice().sort((a,b)=>a-b).join(';'),
@@ -477,6 +483,12 @@ const Physics = (() => {
             ev.sumSolverDeltaAngular+=deltaAngularSolver;
             ev.sumCorrectionDeltaAngular+=deltaAngularCorrection;
             ev.sumTotalDeltaAngular+=deltaAngularTotal;
+            ev.sumSolverDeltaAngularIncludingStart+=deltaAngularSolver;
+            ev.sumCorrectionDeltaAngularIncludingStart+=deltaAngularCorrection;
+            ev.sumTotalDeltaAngularIncludingStart+=deltaAngularTotal;
+            const observedDeltaAngular=item.body.angularVelocity-ev.lastObservedOmega;
+            ev.observedDeltaAngular+=observedDeltaAngular;
+            ev.lastObservedOmega=item.body.angularVelocity;
             ev.minWidth=Math.min(ev.minWidth,info.span); ev.maxWidth=Math.max(ev.maxWidth,info.span);
             ev.maxOffset=Math.max(ev.maxOffset,info.offset); ev.maxAbsDvx=Math.max(ev.maxAbsDvx,Math.abs(deltaVx));
             ev.totalAbsDvx+=Math.abs(deltaVx);
