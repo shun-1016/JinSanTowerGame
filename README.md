@@ -35,6 +35,26 @@ v23.5では、物理パラメータ、ピース形状生成、通常モード、
 - ZIP 1ファイルとして自動ダウンロードし、必要に応じて画面から再保存可能。
 - 物理計測項目、Matter.js 0.20.0の接触点取得ロジック、物理パラメータは変更なし。
 
+## v1.37.5
+
+### 目的
+v1.37.4で追加したsolver/correction角速度分離診断について、`contact_changes.csv` のchange-point行にも同じ分解値を記録できるようにします。あわせて `contact_events.csv` では接触イベント全体について各substepのsolver/correction/total角速度変化を積算して記録します。
+
+### 追加・修正した診断
+- `contact_changes_*.csv` の各change-pointに以下を記録
+  - `solver_delta_angular_velocity`：そのsubstepのMatter.jsソルバによる角速度変化
+  - `correction_delta_angular_velocity`：そのsubstepの既存の狭接触角速度補正による角速度変化
+  - `total_delta_angular_velocity`：そのsubstepの更新前から補正後までの角速度変化
+- `contact_events_*.csv` では接触イベント中の各substepについて上記3値を積算し、イベント全体の分解値として記録
+- `total = solver + correction` の関係を維持する診断値として出力
+
+### 物理挙動
+- Matter.jsの物理パラメータは変更しません。
+- 狭接触角速度補正の計算式・適用条件は変更しません。
+- 接触判定、イベント分類、change-point抽出条件は変更しません。
+- 計測・診断情報のみ変更します。
+- `docs/` は変更しません。
+
 ## v1.37.4
 
 ### 目的
