@@ -1,8 +1,8 @@
-/* v1.37.4 - solver/correction angular-velocity diagnostics / ZIP log export */
+/* v1.37.5 - contact-change solver/correction angular-velocity diagnostics / ZIP log export */
 (() => {
   'use strict';
 
-  const VERSION = 'v1.37.4';
+  const VERSION = 'v1.37.5';
   const ASSET_PREFIX = 'assets/';
   const MAX_DISCOVERY = 999;
   const POST_LAND_FRAMES = 60;

@@ -372,6 +372,8 @@ const Physics = (() => {
     ev.deltaX=ev.endX-ev.startX; ev.deltaY=ev.endY-ev.startY;
     ev.deltaAngle=ev.endAngle-ev.startAngle; ev.deltaVx=ev.endVx-ev.startVx;
     ev.deltaVy=ev.endVy-ev.startVy; ev.deltaOmega=ev.endOmega-ev.startOmega;
+    // Aggregate per-substep decomposition for contact_events.csv.
+    // The sums satisfy: total = solver + correction (within floating-point error).
     ev.partIds=Array.from(ev.partIds||[]);
     plugin.groundContactEvents=plugin.groundContactEvents||[];
     plugin.groundContactEvents.push(ev);
@@ -444,6 +446,7 @@ const Physics = (() => {
               maxDvx:deltaVx,maxDvxSubstep:physicsSubstepCounter,maxDvxWidth:info.span,maxDvxOffset:info.offset,
               maxDvxVn:response?response.deltaVn:NaN,maxDvxVt:response?response.deltaVt:NaN,
               maxAbsDomega:Math.abs(deltaOmega),maxDomega:deltaOmega,maxDomegaSubstep:physicsSubstepCounter,
+              sumSolverDeltaAngular:deltaAngularSolver,sumCorrectionDeltaAngular:deltaAngularCorrection,sumTotalDeltaAngular:deltaAngularTotal,
               maxAbsDvt:response?Math.abs(response.deltaVt):0,totalAbsDvx:Math.abs(deltaVx),
               partIds:new Set(info.partIds||[]),
               lastPartKey:(info.partIds||[]).slice().sort((a,b)=>a-b).join(';'),
@@ -455,6 +458,7 @@ const Physics = (() => {
                 vxBefore:item.vx,vxAfter:item.body.velocity.x,deltaVx,
                 vyBefore:item.vy,vyAfter:item.body.velocity.y,deltaVy,
                 angularBefore:item.omega,angularAfter:item.body.angularVelocity,deltaAngular:deltaOmega,
+                solverDeltaAngular:deltaAngularSolver,correctionDeltaAngular:deltaAngularCorrection,totalDeltaAngular:deltaAngularTotal,
                 deltaVn:response?response.deltaVn:NaN,deltaVt:response?response.deltaVt:NaN,
                 x:item.body.position.x,angle:item.body.angle,cumulativeDeltaX:0,cumulativeDeltaAngle:0,
                 contactPoints:response?response.contactCount:0,supportCount:response?response.supportCount:0
@@ -465,6 +469,9 @@ const Physics = (() => {
             ev.endSubstep=physicsSubstepCounter; ev.durationSubsteps++;
             ev.endX=item.body.position.x; ev.endY=item.body.position.y; ev.endAngle=item.body.angle;
             ev.endVx=item.body.velocity.x; ev.endVy=item.body.velocity.y; ev.endOmega=item.body.angularVelocity;
+            ev.sumSolverDeltaAngular+=deltaAngularSolver;
+            ev.sumCorrectionDeltaAngular+=deltaAngularCorrection;
+            ev.sumTotalDeltaAngular+=deltaAngularTotal;
             ev.minWidth=Math.min(ev.minWidth,info.span); ev.maxWidth=Math.max(ev.maxWidth,info.span);
             ev.maxOffset=Math.max(ev.maxOffset,info.offset); ev.maxAbsDvx=Math.max(ev.maxAbsDvx,Math.abs(deltaVx));
             ev.totalAbsDvx+=Math.abs(deltaVx);
@@ -494,6 +501,7 @@ const Physics = (() => {
                 vxBefore:item.vx,vxAfter:item.body.velocity.x,deltaVx,
                 vyBefore:item.vy,vyAfter:item.body.velocity.y,deltaVy,
                 angularBefore:item.omega,angularAfter:item.body.angularVelocity,deltaAngular:deltaOmega,
+                solverDeltaAngular:deltaAngularSolver,correctionDeltaAngular:deltaAngularCorrection,totalDeltaAngular:deltaAngularTotal,
                 deltaVn:response?response.deltaVn:NaN,deltaVt:response?response.deltaVt:NaN,
                 x:item.body.position.x,angle:item.body.angle,
                 cumulativeDeltaX:item.body.position.x-ev.startX,

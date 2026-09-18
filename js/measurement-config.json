@@ -1,5 +1,5 @@
 {
-  "version": "v1.37.4",
+  "version": "v1.37.5",
   "description": "Measurement field dictionary. Calculation logic remains in JavaScript modules.",
   "categories": {
     "contact": {
