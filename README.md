@@ -35,6 +35,14 @@ v23.5では、物理パラメータ、ピース形状生成、通常モード、
 - ZIP 1ファイルとして自動ダウンロードし、必要に応じて画面から再保存可能。
 - 物理計測項目、Matter.js 0.20.0の接触点取得ロジック、物理パラメータは変更なし。
 
+## v1.37.6
+
+- v1.37.5で `contact_changes` に記録される solver / correction / total の分解値を、`contact_events` のイベント集計値にも正しく反映。
+- `contact_events.csv` の3列は、各イベント中の全接触substepにおける `solverDeltaAngular` / `correctionDeltaAngular` / `totalDeltaAngular` の累積値を出力。
+- `total_delta_angular_velocity` は `solver_delta_angular_velocity + correction_delta_angular_velocity` と一致することを確認できる診断値。
+- Matter.js の物理パラメータ、narrow-contact correction の計算式・適用条件、接触判定・イベント分類は変更しない。
+- 診断のみの修正。`docs/` は変更しない。
+
 ## v1.37.5
 
 ### 目的
