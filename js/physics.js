@@ -1,4 +1,4 @@
-/* v1.37.4 - solver/correction angular-velocity diagnostics */
+/* v1.37.7 - corrected event-level solver/correction angular-velocity diagnostics */
 const Physics = (() => {
   const {Engine,World,Bodies,Body,Sleeping}=Matter;
 
@@ -372,8 +372,13 @@ const Physics = (() => {
     ev.deltaX=ev.endX-ev.startX; ev.deltaY=ev.endY-ev.startY;
     ev.deltaAngle=ev.endAngle-ev.startAngle; ev.deltaVx=ev.endVx-ev.startVx;
     ev.deltaVy=ev.endVy-ev.startVy; ev.deltaOmega=ev.endOmega-ev.startOmega;
-    // Aggregate per-substep decomposition for contact_events.csv.
-    // The sums satisfy: total = solver + correction (within floating-point error).
+    // Aggregate decomposition is defined from the latched event-start state
+    // (after the START substep) through the last active-contact substep.
+    // The START substep is intentionally excluded because its post-correction
+    // state is the event start state; including START would make the aggregate
+    // no longer match endOmega - startOmega.
+    // The sums satisfy: total = solver + correction (within floating-point error)
+    // and total should match endOmega - startOmega.
     ev.partIds=Array.from(ev.partIds||[]);
     plugin.groundContactEvents=plugin.groundContactEvents||[];
     plugin.groundContactEvents.push(ev);
@@ -446,7 +451,7 @@ const Physics = (() => {
               maxDvx:deltaVx,maxDvxSubstep:physicsSubstepCounter,maxDvxWidth:info.span,maxDvxOffset:info.offset,
               maxDvxVn:response?response.deltaVn:NaN,maxDvxVt:response?response.deltaVt:NaN,
               maxAbsDomega:Math.abs(deltaOmega),maxDomega:deltaOmega,maxDomegaSubstep:physicsSubstepCounter,
-              sumSolverDeltaAngular:deltaAngularSolver,sumCorrectionDeltaAngular:deltaAngularCorrection,sumTotalDeltaAngular:deltaAngularTotal,
+              sumSolverDeltaAngular:0,sumCorrectionDeltaAngular:0,sumTotalDeltaAngular:0,
               maxAbsDvt:response?Math.abs(response.deltaVt):0,totalAbsDvx:Math.abs(deltaVx),
               partIds:new Set(info.partIds||[]),
               lastPartKey:(info.partIds||[]).slice().sort((a,b)=>a-b).join(';'),
