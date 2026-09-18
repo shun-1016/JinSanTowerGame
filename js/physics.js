@@ -1,4 +1,4 @@
-/* v1.37.3 - centralized physics tuning constants / contact offset threshold test */
+/* v1.37.4 - solver/correction angular-velocity diagnostics */
 const Physics = (() => {
   const {Engine,World,Bodies,Body,Sleeping}=Matter;
 
@@ -246,7 +246,7 @@ const Physics = (() => {
     return null;
   }
 
-  function getGroundCollisionResponse(body,deltaVx,deltaVy,deltaAngular){
+  function getGroundCollisionResponse(body,deltaVx,deltaVy,deltaAngular,deltaAngularSolver=deltaAngular){
     if(!ground||!body||body.isStatic)return null;
     const root=getBodyRoot(body);
     const pairs=engine.pairs&&engine.pairs.list?engine.pairs.list:[];
@@ -298,6 +298,7 @@ const Physics = (() => {
       linearImpulseNormalProxy:Number.isFinite(mass)?mass*deltaVn:NaN,
       linearImpulseTangentProxy:Number.isFinite(mass)?mass*deltaVt:NaN,
       angularImpulseProxy:Number.isFinite(inertia)?inertia*deltaAngular:NaN,
+      angularImpulseSolverProxy:Number.isFinite(inertia)?inertia*deltaAngularSolver:NaN,
       sourcePairId:bestPair&&bestPair.id!==undefined?bestPair.id:''
     };
   }
@@ -392,19 +393,32 @@ const Physics = (() => {
       Engine.update(engine,subDt);
       physicsSubstepCounter++;
       for(const item of before){
+        const angularAfterSolver=item.body.angularVelocity;
+        const deltaAngularSolver=angularAfterSolver-item.omega;
         suppressNarrowLandingTorque(item.body,item.omega);
+        const angularAfterCorrection=item.body.angularVelocity;
+        const deltaAngularCorrection=angularAfterCorrection-angularAfterSolver;
+        const deltaAngularTotal=angularAfterCorrection-item.omega;
+        item.body.plugin=item.body.plugin||{};
+        item.body.plugin.angularVelocityBeforeSolver=item.omega;
+        item.body.plugin.angularVelocityAfterSolver=angularAfterSolver;
+        item.body.plugin.deltaAngularSolver=deltaAngularSolver;
+        item.body.plugin.angularVelocityAfterCorrection=angularAfterCorrection;
+        item.body.plugin.deltaAngularCorrection=deltaAngularCorrection;
+        item.body.plugin.deltaAngularTotal=deltaAngularTotal;
         const info=getGroundContactInfo(item.body);
         const plugin=item.body.plugin=item.body.plugin||{};
         if(info){
           const deltaVx=item.body.velocity.x-item.vx;
           const deltaVy=item.body.velocity.y-item.vy;
           const deltaOmega=item.body.angularVelocity-item.omega;
-          const response=getGroundCollisionResponse(item.body,deltaVx,deltaVy,deltaOmega);
+          const response=getGroundCollisionResponse(item.body,deltaVx,deltaVy,deltaOmega,deltaAngularSolver);
           const event={
             substep:physicsSubstepCounter,
             vxBefore:item.vx,vxAfter:item.body.velocity.x,deltaVx,
             vyBefore:item.vy,vyAfter:item.body.velocity.y,deltaVy,
             angularBefore:item.omega,angularAfter:item.body.angularVelocity,deltaAngular:deltaOmega,
+            angularAfterSolver,deltaAngularSolver,angularAfterCorrection,deltaAngularCorrection,deltaAngularTotal,
             xBefore:item.x,xAfter:item.body.position.x,deltaX:item.body.position.x-item.x,
             yBefore:item.y,yAfter:item.body.position.y,deltaY:item.body.position.y-item.y,
             contactWidth:info.span,contactOffset:info.offset,contactSource:info.source,

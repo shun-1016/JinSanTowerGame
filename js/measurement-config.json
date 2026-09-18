@@ -1,5 +1,5 @@
 {
-  "version": "v1.37.3",
+  "version": "v1.37.4",
   "description": "Measurement field dictionary. Calculation logic remains in JavaScript modules.",
   "categories": {
     "contact": {
@@ -88,6 +88,30 @@
         "csv": "landing_contact_point_velocity_px_per_frame",
         "unit": "px/frame",
         "description": "Contact point velocity Y"
+      },
+      "angularVelocityAfterSolver": {
+        "enabled": true,
+        "csv": "solver_angular_velocity",
+        "unit": "rad/frame",
+        "description": "Angular velocity immediately after Matter.js Engine.update"
+      },
+      "deltaAngularSolver": {
+        "enabled": true,
+        "csv": "solver_delta_angular_velocity",
+        "unit": "rad/frame",
+        "description": "Angular velocity change caused by the Matter.js solver step"
+      },
+      "deltaAngularCorrection": {
+        "enabled": true,
+        "csv": "correction_delta_angular_velocity",
+        "unit": "rad/frame",
+        "description": "Angular velocity change caused by the existing narrow-contact correction"
+      },
+      "deltaAngularTotal": {
+        "enabled": true,
+        "csv": "total_delta_angular_velocity",
+        "unit": "rad/frame",
+        "description": "Total angular velocity change from pre-step to post-correction"
       }
     }
   }
