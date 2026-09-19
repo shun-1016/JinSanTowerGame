@@ -1,16 +1,16 @@
-/* v1.38.0 - stability-until-rest measurement / contact-event angular ledger diagnostics */
+/* v1.38.1 - stability-until-rest measurement / reliable ZIP save diagnostics */
 (() => {
   'use strict';
 
-  const VERSION = 'v1.38.0';
+  const VERSION = 'v1.38.1';
   const ASSET_PREFIX = 'assets/';
   const MAX_DISCOVERY = 999;
   // v1.38.0: measure each piece until it is stably at rest.
   // The physics simulation itself is unchanged; these values affect measurement
   // termination only.
-  const MIN_POST_LAND_FRAMES = 60;
-  const STABLE_REQUIRED_FRAMES = 30;
-  const POST_STABLE_FRAMES = 30;
+  const MIN_POST_LAND_FRAMES = 30;
+  const STABLE_REQUIRED_FRAMES = 20;
+  const POST_STABLE_FRAMES = 0;
   const MAX_POST_LAND_FRAMES = 600;
   const STABLE_VX_THRESHOLD = 0.01;
   const STABLE_VY_THRESHOLD = 0.01;
@@ -50,7 +50,7 @@
   const summaryHeader = [
     'run','piece','compound_mode','status','frame_count','landing_frame','post_land_frame_count','mass','inertia','com_offset_px','footprint_width_px','contact_points','contact_parts',
     'landing_angle','landing_pre_vx','landing_pre_vy','landing_pre_angular_velocity','landing_solver_angular_velocity','landing_solver_delta_angular_velocity','landing_correction_delta_angular_velocity','landing_total_delta_angular_velocity','landing_vx','landing_vy','landing_angular_velocity','landing_delta_vx','landing_delta_vy','landing_delta_angular_velocity',
-    'max_post_land_abs_vx','max_post_land_abs_vy','max_post_land_abs_angular_velocity','post_land_x_range','post_land_y_range','post_land_angle_range','max_bounce_height_px','sleep_frame','final_sleeping','final_ground_contact','stable_frame','stable_confirmed','stable_required_frames','post_stable_frames','measurement_end_frame','measurement_end_reason',
+    'max_post_land_abs_vx','max_post_land_abs_vy','max_post_land_abs_angular_velocity','post_land_x_range','post_land_y_range','post_land_angle_range','max_bounce_height_px','sleep_frame','final_sleeping','final_ground_contact','stable_frame','stable_confirmed','stable_required_frames','stable_confirmation_frames','measurement_end_frame','measurement_end_reason',
     'physics_parts','triangles','regions','raw_regions','contour_vertices','landing_contact_left_offset_px','landing_contact_right_offset_px','landing_contact_normal_angle_rad','landing_contact_torque_proxy',
     'landing_contact_parts_detail','landing_contact_offsets_xy_px','landing_contact_torque_proxies','landing_contact_world_xy_px','landing_contact_relative_xy_px','landing_contact_normal_xy','landing_contact_omega_cross_r_px_per_frame','landing_contact_point_velocity_px_per_frame',
     'narrow_landing_correction_latched','narrow_landing_contact_width_latched_px','narrow_landing_contact_source_latched','narrow_landing_contact_offset_latched_px','narrow_landing_angular_before_latched','narrow_landing_angular_delta_latched','narrow_landing_angular_after_latched','narrow_landing_correction_applied_latched',
@@ -73,7 +73,7 @@
   // while preserving the causal sequence inside long contact events.
   const contactChangeHeader = ['run','piece','event_index','change_index','substep','reason','part_ids','contact_width_px','contact_offset_px','vx_before','vx_after','delta_vx','vy_before','vy_after','delta_vy','angular_before','angular_after','delta_angular','solver_delta_angular','correction_delta_angular','total_delta_angular','delta_vn','delta_vt','x','angle','cumulative_delta_x','cumulative_delta_angle','contact_points','support_count'];
 
-  const validationHeader = ['run','piece','status','raw_row_count','landing_frame','stable_frame','measurement_end_frame','expected_row_count','row_count_ok','landing_present','stable_confirmed','post_stable_frames','measurement_end_reason'];
+  const validationHeader = ['run','piece','status','raw_row_count','landing_frame','stable_frame','measurement_end_frame','expected_row_count','row_count_ok','landing_present','stable_confirmed','stable_confirmation_frames','measurement_end_reason'];
 
   // One row per re-contact transition. This is intentionally derived from
   // continuous contact events, so it exposes the sequence:
@@ -102,7 +102,7 @@
     stageW: 390, stageH: 500, baseWidth: 0, piece: null, body: null, running: false,
     landingContactDetail: null, landingOtherDynamicBodyIds: [], contactEvents: [], contactChanges: [], contactLoops: [],
     stableFrame: null, stableConsecutiveFrames: 0, stableConfirmed: false, measurementEndFrame: null,
-    measurementEndReason: '', postStableStartFrame: null
+    measurementEndReason: '', postStableStartFrame: null, pieceResults: new Map()
   };
 
   async function loadImage(n){
@@ -238,6 +238,19 @@
   }
 
   function finishPiece(status, endReason=''){
+    // v1.38.1: persist termination metadata per piece so validation.csv does
+    // not depend on the state of the final piece after the whole run completes.
+    const pieceNumber=state.index+1;
+    state.pieceResults.set(pieceNumber,{
+      stableFrame: state.stableFrame,
+      stableConfirmed: state.stableConfirmed,
+      stableRequiredFrames: STABLE_REQUIRED_FRAMES,
+      measurementEndFrame: state.measurementEndFrame,
+      measurementEndReason: endReason||state.measurementEndReason||'',
+      stableConfirmationFrames: state.stableConfirmed&&state.stableFrame!==null&&state.measurementEndFrame!==null
+        ? Math.max(0,state.measurementEndFrame-state.stableFrame+1)
+        : 0
+    });
     if(state.body && Physics.finalizeGroundContactHistory) Physics.finalizeGroundContactHistory(state.body);
     const p=state.body&&state.body.plugin?state.body.plugin:{};
     const arr=parseRows(state.rows); const first=arr[0]||[]; const land=state.landingFrame===null?arr[0]:arr[Math.min(state.landingFrame,Math.max(0,arr.length-1))]||arr[0];
@@ -268,7 +281,7 @@
       maxBounce,sleepFrame,last[colIndex('sleeping')]==='1'?1:0,last[colIndex('ground_contact')]==='1'?1:0,
       state.stableFrame===null?'':state.stableFrame,state.stableConfirmed?1:0,STABLE_REQUIRED_FRAMES,
       state.stableConfirmed&&state.stableFrame!==null&&state.measurementEndFrame!==null
-        ? Math.max(0,state.measurementEndFrame-state.stableFrame)
+        ? Math.max(0,state.measurementEndFrame-state.stableFrame+1)
         : 0,
       state.measurementEndFrame===null?'':state.measurementEndFrame,
       endReason||state.measurementEndReason||'',
@@ -368,34 +381,32 @@
         )
       );
 
-      // A transient low-velocity frame is not enough. The same piece must
-      // satisfy the stability condition continuously for STABLE_REQUIRED_FRAMES.
+      // v1.38.1: after a minimum post-landing observation window,
+      // terminate as soon as the same stable condition has persisted
+      // continuously for STABLE_REQUIRED_FRAMES. No extra tail is added.
       if(postLandFrames>=MIN_POST_LAND_FRAMES && motionStable){
         if(state.stableConsecutiveFrames===0) state.stableFrame=state.frame;
         state.stableConsecutiveFrames++;
       }else{
         state.stableConsecutiveFrames=0;
         state.stableFrame=null;
+        state.postStableStartFrame=null;
       }
 
       if(state.stableConsecutiveFrames>=STABLE_REQUIRED_FRAMES){
         state.stableConfirmed=true;
-        if(state.postStableStartFrame===null) state.postStableStartFrame=state.frame;
-
-        const postStableFrames=state.frame-state.postStableStartFrame;
-        if(postStableFrames>=POST_STABLE_FRAMES){
-          state.measurementEndFrame=state.frame;
-          state.measurementEndReason='stable_confirmed';
-          finishPiece('complete','stable_confirmed');
-          if(state.index+1<state.images.length){
-            setStatus(`${VERSION} 計測中: ${state.index+2}/${state.images.length}`);
-            startPiece(state.index+1);
-          }else{
-            finishRun();
-            return;
-          }
+        state.postStableStartFrame=state.stableFrame;
+        state.measurementEndFrame=state.frame;
+        state.measurementEndReason='stable_confirmed';
+        finishPiece('complete','stable_confirmed');
+        if(state.index+1<state.images.length){
+          setStatus(`${VERSION} 計測中: ${state.index+2}/${state.images.length}`);
+          startPiece(state.index+1);
+        }else{
+          finishRun();
           return;
         }
+        return;
       }
 
       if(postLandFrames>=MAX_POST_LAND_FRAMES){
@@ -477,21 +488,26 @@
       const parsed=parseRows(rs);
       const land=parsed.find(a=>a[colIndex('ground_contact')]==='1');
       const lf=land?Number(land[colIndex('frame')]):'';
-      const sleep=parsed.find(a=>Number(a[colIndex('sleeping')])===1);
-      const stableCandidate=parsed.length && state.index+1===i ? state.stableFrame : '';
       const endFrame=parsed.length ? Number(parsed[parsed.length-1][colIndex('frame')]) : '';
-      const stableConfirmed=(state.index+1===i) ? state.stableConfirmed : false;
-      const endReason=(state.index+1===i) ? state.measurementEndReason : '';
-      const postStableFrames=(stableConfirmed && stableCandidate!==null && stableCandidate!=='')
-        ? Math.max(0,endFrame-stableCandidate) : 0;
+      const result=state.pieceResults.get(i)||{};
+      const stableFrame=result.stableFrame===null||result.stableFrame===undefined?'':result.stableFrame;
+      const stableConfirmed=!!result.stableConfirmed;
+      const measurementEndFrame=result.measurementEndFrame===null||result.measurementEndFrame===undefined
+        ? endFrame
+        : result.measurementEndFrame;
+      const endReason=result.measurementEndReason||'';
+      const stableConfirmationFrames=Number.isFinite(Number(result.stableConfirmationFrames))
+        ? Number(result.stableConfirmationFrames) : 0;
+      const expectedRowCount=rs.length?endFrame+1:'';
+      const rowCountOk=rs.length>0 && Number.isFinite(Number(expectedRowCount)) && rs.length===Number(expectedRowCount);
       rows.push([
         state.run,i,rs.length?'complete':'missing',rs.length,lf,
-        stableCandidate===null?'':stableCandidate,endFrame,
-        rs.length?endFrame+1:'',
-        rs.length>0,lf!=='',stableConfirmed,postStableFrames,endReason
+        stableFrame,measurementEndFrame,
+        expectedRowCount,rowCountOk,rs.length>0,lf!=='',
+        stableConfirmed,stableConfirmationFrames,endReason
       ]);
     }
-    rows.push([state.run,'RUN_TOTAL',state.images.length===rows.length?'complete':'incomplete',state.allRows.length,'','','','','','','','','']);
+    rows.push([state.run,'RUN_TOTAL',state.images.length===rows.length?'complete':'incomplete',state.allRows.length,'','','','','','','','','','']);
     return rows;
   }
 
@@ -526,7 +542,13 @@
     }
     const runFolder=`run${state.run}`; for(const f of files)f.name=`${runFolder}/${f.name}`;
     const blob=zip(files),url=URL.createObjectURL(blob),fileName=`JinSanTowerGame_${VERSION}_run${state.run}_diagnostics.zip`,a=$('measurementDownload');
-    if(a){a.href=url;a.download=fileName;a.textContent=`${VERSION} 計測ZIPを保存`;a.classList.remove('hidden');a.style.display='block';try{const auto=document.createElement('a');auto.href=url;auto.download=fileName;auto.style.display='none';document.body.appendChild(auto);auto.click();auto.remove();}catch(e){}}
+    if(a){
+      a.href=url;
+      a.download=fileName;
+      a.textContent=`${VERSION} 計測ZIPを保存`;
+      a.classList.remove('hidden');
+      a.style.display='block';
+    }
     // iPhone/iPad: share the generated ZIP directly to the iOS Share Sheet.
     // A Shortcuts share action can then upload the file to GitHub without exposing a token to the game.
     let share=$('measurementShare');
@@ -547,7 +569,7 @@
       }catch(e){ if(e&&e.name!=='AbortError') alert(`ZIP共有に失敗しました: ${e.message||e}`); }
     };
     const b=$('measurementButton');if(b){b.disabled=false;b.textContent='全ピース自動計測';}
-    setStatus(`${VERSION} 計測完了（${state.images.length}ピース / run ${state.run}）`); const ss=$('measurementStatus');if(ss)ss.textContent=`完了。ZIPは自動保存され、iPhoneでは「ZIPを共有（iPhone）」からショートカットへ渡せます。`;
+    setStatus(`${VERSION} 計測完了（${state.images.length}ピース / run ${state.run}）`); const ss=$('measurementStatus');if(ss)ss.textContent=`完了。下の「計測ZIPを保存」から保存できます。iPhoneでは「ZIPを共有（iPhone）」からショートカットへ渡せます。`;
     const modal=$('modeModal');if(modal)modal.classList.remove('hidden');const normal=$('normalModeButton');if(normal)normal.disabled=false;const endless=$('endlessModeButton');if(endless)endless.disabled=false;
   }
 
@@ -556,7 +578,7 @@
     const run=prompt(`${VERSION} 自動計測\n今回のRun番号を入力してください（例: 1）`,String(state.run));
     if(run===null) return;
     const n=parseInt(run,10); if(!Number.isInteger(n)||n<1){ alert('Run番号は1以上の整数を入力してください。'); return; }
-    state.run=n; state.index=0;state.frame=0;state.rows=[];state.allRows=[];state.summaries=[];state.contactEvents=[];state.contactChanges=[];state.contactLoops=[];
+    state.run=n; state.index=0;state.frame=0;state.rows=[];state.allRows=[];state.summaries=[];state.contactEvents=[];state.contactChanges=[];state.contactLoops=[];state.pieceResults=new Map();
     state.stableFrame=null;state.stableConsecutiveFrames=0;state.stableConfirmed=false;state.measurementEndFrame=null;state.measurementEndReason='';state.postStableStartFrame=null;
     state.piece=null;state.body=null;state.running=true;
     const modal=$('modeModal'); if(modal) modal.classList.add('hidden');
