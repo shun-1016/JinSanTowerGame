@@ -2,7 +2,7 @@
 (() => {
   'use strict';
 
-  const VERSION = 'v1.38.3';
+  const VERSION = 'v1.38.4';
   const ASSET_PREFIX = 'assets/';
   const MAX_DISCOVERY = 999;
   // v1.38.0: measure each piece until it is stably at rest.
@@ -10,7 +10,6 @@
   // termination only.
   const MIN_POST_LAND_FRAMES = 30;
   const STABLE_REQUIRED_FRAMES = 20;
-  const POST_STABLE_FRAMES = 0;
   const MAX_POST_LAND_FRAMES = 600;
   const STABLE_VX_THRESHOLD = 0.01;
   const STABLE_VY_THRESHOLD = 0.01;
@@ -171,10 +170,10 @@
     const landing=parsed.find(a=>a[gi]==='1'),lf=landing?Number(landing[fi]):NaN,keep=new Set();
     for(let f=0;f<parsed.length;f+=10)keep.add(f);
     for(let f=0;f<Math.min(10,parsed.length);f++)keep.add(f);
-    if(Number.isFinite(lf))for(let f=Math.max(0,lf-2);f<=lf+POST_LAND_FRAMES;f++)keep.add(f);
+    if(Number.isFinite(lf))for(let f=Math.max(0,lf-2);f<=lf+MIN_POST_LAND_FRAMES;f++)keep.add(f);
+    // Always retain the actual measurement endpoint. No separate post-stable
+    // tail is needed because v1.38.1+ terminates on confirmed stability.
     keep.add(parsed.length-1);
-    const tailStart=Math.max(0,parsed.length-POST_STABLE_FRAMES-5);
-    for(let f=tailStart;f<parsed.length;f++)keep.add(f);
     return parsed.filter(a=>keep.has(Number(a[fi]))).map(compactFrameRow);
   }
 
@@ -511,14 +510,95 @@
     return rows;
   }
 
-  function crc32(bytes){ let crc=0xffffffff; for(let i=0;i<bytes.length;i++){ crc^=bytes[i]; for(let j=0;j<8;j++) crc=(crc>>>1)^((crc&1)?0xedb88320:0); } return (crc^0xffffffff)>>>0; }
-  const u16=(v,o,n)=>v.setUint16(o,n,true), u32=(v,o,n)=>v.setUint32(o,n>>>0,true);
-  function zip(files){
-    const enc=new TextEncoder(),chunks=[],central=[]; let offset=0; const now=new Date(),year=Math.max(1980,now.getFullYear()),dt=(now.getHours()<<11)|(now.getMinutes()<<5)|Math.floor(now.getSeconds()/2),dd=((year-1980)<<9)|((now.getMonth()+1)<<5)|now.getDate();
-    for(const f of files){ const name=enc.encode(f.name),data=enc.encode(f.content),crc=crc32(data),b=new ArrayBuffer(30+name.length+data.length),v=new DataView(b); u32(v,0,0x04034b50);u16(v,4,20);u16(v,6,0);u16(v,8,0);u16(v,10,dt);u16(v,12,dd);u32(v,14,crc);u32(v,18,data.length);u32(v,22,data.length);u16(v,26,name.length);u16(v,28,0);new Uint8Array(b,30,name.length).set(name);new Uint8Array(b,30+name.length,data.length).set(data);chunks.push(b);central.push({name,crc,size:data.length,offset});offset+=b.byteLength; }
-    const co=offset; for(const e of central){ const b=new ArrayBuffer(46+e.name.length),v=new DataView(b);u32(v,0,0x02014b50);u16(v,4,20);u16(v,6,20);u16(v,8,0);u16(v,10,0);u16(v,12,dt);u16(v,14,dd);u32(v,16,e.crc);u32(v,20,e.size);u32(v,24,e.size);u16(v,28,e.name.length);u16(v,30,0);u16(v,32,0);u16(v,34,0);u16(v,36,0);u32(v,38,0);u32(v,42,e.offset);new Uint8Array(b,46,e.name.length).set(e.name);chunks.push(b);offset+=b.byteLength; }
-    const end=new ArrayBuffer(22),v=new DataView(end);u32(v,0,0x06054b50);u16(v,8,central.length);u16(v,10,central.length);u32(v,12,offset-co);u32(v,16,co);chunks.push(end);return new Blob(chunks,{type:'application/zip'});
+  function crc32(bytes){
+    let crc=0xffffffff;
+    for(let i=0;i<bytes.length;i++){
+      crc^=bytes[i];
+      for(let j=0;j<8;j++) crc=(crc>>>1)^((crc&1)?0xedb88320:0);
+    }
+    return (crc^0xffffffff)>>>0;
   }
+
+  const zipU16=(view,offset,value)=>view.setUint16(offset,value,true);
+  const zipU32=(view,offset,value)=>view.setUint32(offset,value>>>0,true);
+
+  function zip(files){
+    const enc=new TextEncoder();
+    const localChunks=[];
+    const centralChunks=[];
+    let offset=0;
+
+    for(const file of files){
+      const name=enc.encode(file.name);
+      const data=enc.encode(file.content);
+      const crc=crc32(data);
+
+      // ZIP local file header + UTF-8 filename + uncompressed data.
+      const local=new ArrayBuffer(30+name.length+data.length);
+      const lv=new DataView(local);
+      zipU32(lv,0,0x04034b50);
+      zipU16(lv,4,20);
+      zipU16(lv,6,0);
+      zipU16(lv,8,0);
+      zipU16(lv,10,0);
+      zipU16(lv,12,0);
+      zipU32(lv,14,crc);
+      zipU32(lv,18,data.length);
+      zipU32(lv,22,data.length);
+      zipU16(lv,26,name.length);
+      zipU16(lv,28,0);
+      new Uint8Array(local,30,name.length).set(name);
+      new Uint8Array(local,30+name.length,data.length).set(data);
+
+      localChunks.push(local);
+
+      // ZIP central-directory entry.
+      const central=new ArrayBuffer(46+name.length);
+      const cv=new DataView(central);
+      zipU32(cv,0,0x02014b50);
+      zipU16(cv,4,20);
+      zipU16(cv,6,20);
+      zipU16(cv,8,0);
+      zipU16(cv,10,0);
+      zipU16(cv,12,0);
+      zipU16(cv,14,0);
+      zipU32(cv,16,crc);
+      zipU32(cv,20,data.length);
+      zipU32(cv,24,data.length);
+      zipU16(cv,28,name.length);
+      zipU16(cv,30,0);
+      zipU16(cv,32,0);
+      zipU16(cv,34,0);
+      zipU16(cv,36,0);
+      zipU32(cv,38,0);
+      zipU32(cv,42,offset);
+      new Uint8Array(central,46,name.length).set(name);
+
+      centralChunks.push(central);
+      offset+=local.byteLength;
+    }
+
+    const centralOffset=offset;
+    let centralSize=0;
+    for(const chunk of centralChunks) centralSize+=chunk.byteLength;
+
+    const end=new ArrayBuffer(22);
+    const ev=new DataView(end);
+    zipU32(ev,0,0x06054b50);
+    zipU16(ev,4,0);
+    zipU16(ev,6,0);
+    zipU16(ev,8,centralChunks.length);
+    zipU16(ev,10,centralChunks.length);
+    zipU32(ev,12,centralSize);
+    zipU32(ev,16,centralOffset);
+    zipU16(ev,20,0);
+
+    return new Blob(
+      [...localChunks,...centralChunks,end],
+      {type:'application/zip'}
+    );
+  }
+
 
   function finishRun(){
     state.running=false; state.piece=null; state.body=null; clearDynamicBodies();
@@ -619,6 +699,7 @@
       for(const f of files) f.name=`${runFolder}/${f.name}`;
 
       setStage(`ZIPバイナリ生成（${files.length}ファイル / ${exportStats.csvChars}文字）`);
+      if(files.length===0) throw new Error('ZIP対象ファイルが0件です。');
       blob=zip(files);
       if(!blob || !blob.size) throw new Error('ZIP Blobが空です。');
       exportStats.zipBytes=blob.size;
