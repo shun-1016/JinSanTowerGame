@@ -35,7 +35,7 @@ v23.5では、物理パラメータ、ピース形状生成、通常モード、
 - ZIP 1ファイルとして自動ダウンロードし、必要に応じて画面から再保存可能。
 - 物理計測項目、Matter.js 0.20.0の接触点取得ロジック、物理パラメータは変更なし。
 
-## v1.37.8
+## v1.38.0
 
 - `contact_events.csv` のイベントレベル Solver / Correction / Total 集計ロジックを修正。
 - イベント開始値は最初の接触substepの **Engine.update + 補正後** の状態であるため、そのSTART substepの角速度変化をイベント集計から除外し、イベント開始状態から終了状態までのsubstepだけを累積する方式に変更。
@@ -114,3 +114,12 @@ v1.37.3までのログでは、接触時の角速度変化について「Matter.
 - `?narrowCorrection=on/off` のURL切替は削除
 
 `measurement-contact.js` は `measurement.js` より先に読み込みます。
+
+
+## v1.38.0 measurement termination
+- Each piece is measured until a stable-at-rest condition is continuously satisfied.
+- Minimum post-landing measurement: 60 frames.
+- Stability condition: ground contact plus sleeping or low linear/angular velocity.
+- Stability must persist for 30 frames, followed by 30 additional post-stability frames.
+- Maximum post-landing measurement: 600 frames.
+- These rules affect measurement termination only; Matter.js physics parameters and physics behavior are unchanged.
