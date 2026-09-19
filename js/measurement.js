@@ -2,7 +2,7 @@
 (() => {
   'use strict';
 
-  const VERSION = 'v1.38.1';
+  const VERSION = 'v1.38.2';
   const ASSET_PREFIX = 'assets/';
   const MAX_DISCOVERY = 999;
   // v1.38.0: measure each piece until it is stably at rest.
@@ -522,54 +522,99 @@
 
   function finishRun(){
     state.running=false; state.piece=null; state.body=null; clearDynamicBodies();
-    const meta=metadataRows();
-    const files=[{name:'metadata.csv',content:makeCsv(meta.h,meta.rows)},{name:'validation.csv',content:makeCsv(validationHeader,validationRows())}];
-    const CHUNK_PIECES=5, summariesByPiece=new Map(), eventsByPiece=new Map(), changesByPiece=new Map(), loopsByPiece=new Map(), rawByPiece=new Map();
-    for(const row of state.summaries){const piece=Number(row[1]);if(Number.isInteger(piece)&&piece>0){if(!summariesByPiece.has(piece))summariesByPiece.set(piece,[]);summariesByPiece.get(piece).push(row);}}
-    for(const row of state.contactEvents){const piece=Number(row[1]);if(Number.isInteger(piece)&&piece>0){if(!eventsByPiece.has(piece))eventsByPiece.set(piece,[]);eventsByPiece.get(piece).push(row);}}
-    for(const row of (state.contactChanges||[])){const piece=Number(row[1]);if(Number.isInteger(piece)&&piece>0){if(!changesByPiece.has(piece))changesByPiece.set(piece,[]);changesByPiece.get(piece).push(row);}}
-    for(const row of (state.contactLoops||[])){const piece=Number(row[1]);if(Number.isInteger(piece)&&piece>0){if(!loopsByPiece.has(piece))loopsByPiece.set(piece,[]);loopsByPiece.get(piece).push(row);}}
-    for(const r of state.allRows){const piece=Number(r.split(',')[0]);if(Number.isInteger(piece)&&piece>0){if(!rawByPiece.has(piece))rawByPiece.set(piece,[]);rawByPiece.get(piece).push(r);}}
-    for(let start=1;start<=state.images.length;start+=CHUNK_PIECES){
-      const end=Math.min(start+CHUNK_PIECES-1,state.images.length),summaryRows=[],eventRows=[],changeRows=[],loopRows=[],frameRows=[];
-      for(let piece=start;piece<=end;piece++){summaryRows.push(...(summariesByPiece.get(piece)||[]));eventRows.push(...(eventsByPiece.get(piece)||[]));changeRows.push(...(changesByPiece.get(piece)||[]));loopRows.push(...(loopsByPiece.get(piece)||[]));frameRows.push(...selectCompactFrames(rawByPiece.get(piece)||[]));}
-      const range=`${pad2(start)}-${pad2(end)}`;
-      files.push({name:`summary_${range}.csv`,content:makeCsv(summaryHeader,summaryRows)});
-      files.push({name:`contact_events_${range}.csv`,content:makeCsv(contactEventHeader,eventRows)});
-      files.push({name:`contact_changes_${range}.csv`,content:makeCsv(contactChangeHeader,changeRows)});
-      files.push({name:`contact_loops_${range}.csv`,content:makeCsv(contactLoopHeader,loopRows)});
-      files.push({name:`frames_${range}.csv`,content:makeCsv(frameHeader,frameRows)});
+
+    // Create the completion panel first. This makes the UI independent from
+    // metadata/ZIP generation and gives a visible diagnostic if export fails.
+    let result=$('measurementResult');
+    if(!result){
+      result=document.createElement('div');
+      result.id='measurementResult';
+      result.className='measurementResult';
+      document.body.appendChild(result);
     }
-    const runFolder=`run${state.run}`; for(const f of files)f.name=`${runFolder}/${f.name}`;
-    const blob=zip(files),url=URL.createObjectURL(blob),fileName=`JinSanTowerGame_${VERSION}_run${state.run}_diagnostics.zip`,a=$('measurementDownload');
-    if(a){
-      a.href=url;
-      a.download=fileName;
-      a.textContent=`${VERSION} 計測ZIPを保存`;
-      a.classList.remove('hidden');
-      a.style.display='block';
+    result.innerHTML='';
+    const title=document.createElement('div');
+    title.textContent=`${VERSION} 計測完了。ZIPを準備しています…`;
+    title.style.fontWeight='700';
+    title.style.marginBottom='8px';
+    result.appendChild(title);
+
+    const fileName=`JinSanTowerGame_${VERSION}_run${state.run}_diagnostics.zip`;
+    let blob=null, url='';
+    try{
+      const meta=metadataRows();
+      const files=[{name:'metadata.csv',content:makeCsv(meta.h,meta.rows)},{name:'validation.csv',content:makeCsv(validationHeader,validationRows())}];
+      const CHUNK_PIECES=5, summariesByPiece=new Map(), eventsByPiece=new Map(), changesByPiece=new Map(), loopsByPiece=new Map(), rawByPiece=new Map();
+      for(const row of state.summaries){const piece=Number(row[1]);if(Number.isInteger(piece)&&piece>0){if(!summariesByPiece.has(piece))summariesByPiece.set(piece,[]);summariesByPiece.get(piece).push(row);}}
+      for(const row of state.contactEvents){const piece=Number(row[1]);if(Number.isInteger(piece)&&piece>0){if(!eventsByPiece.has(piece))eventsByPiece.set(piece,[]);eventsByPiece.get(piece).push(row);}}
+      for(const row of (state.contactChanges||[])){const piece=Number(row[1]);if(Number.isInteger(piece)&&piece>0){if(!changesByPiece.has(piece))changesByPiece.set(piece,[]);changesByPiece.get(piece).push(row);}}
+      for(const row of (state.contactLoops||[])){const piece=Number(row[1]);if(Number.isInteger(piece)&&piece>0){if(!loopsByPiece.has(piece))loopsByPiece.set(piece,[]);loopsByPiece.get(piece).push(row);}}
+      for(const r of state.allRows){const piece=Number(r.split(',')[0]);if(Number.isInteger(piece)&&piece>0){if(!rawByPiece.has(piece))rawByPiece.set(piece,[]);rawByPiece.get(piece).push(r);}}
+      for(let start=1;start<=state.images.length;start+=CHUNK_PIECES){
+        const end=Math.min(start+CHUNK_PIECES-1,state.images.length),summaryRows=[],eventRows=[],changeRows=[],loopRows=[],frameRows=[];
+        for(let piece=start;piece<=end;piece++){summaryRows.push(...(summariesByPiece.get(piece)||[]));eventRows.push(...(eventsByPiece.get(piece)||[]));changeRows.push(...(changesByPiece.get(piece)||[]));loopRows.push(...(loopsByPiece.get(piece)||[]));frameRows.push(...selectCompactFrames(rawByPiece.get(piece)||[]));}
+        const range=`${pad2(start)}-${pad2(end)}`;
+        files.push({name:`summary_${range}.csv`,content:makeCsv(summaryHeader,summaryRows)});
+        files.push({name:`contact_events_${range}.csv`,content:makeCsv(contactEventHeader,eventRows)});
+        files.push({name:`contact_changes_${range}.csv`,content:makeCsv(contactChangeHeader,changeRows)});
+        files.push({name:`contact_loops_${range}.csv`,content:makeCsv(contactLoopHeader,loopRows)});
+        files.push({name:`frames_${range}.csv`,content:makeCsv(frameHeader,frameRows)});
+      }
+      const runFolder=`run${state.run}`; for(const f of files)f.name=`${runFolder}/${f.name}`;
+      blob=zip(files);
+      url=URL.createObjectURL(blob);
+    }catch(e){
+      const message=e&&e.message?e.message:String(e);
+      title.textContent=`${VERSION} 計測は完了しましたが、ZIP生成に失敗しました。`;
+      const detail=document.createElement('div');
+      detail.textContent=`エラー: ${message}`;
+      detail.style.fontSize='12px';
+      detail.style.marginTop='4px';
+      result.appendChild(detail);
+      console.error('[measurement] export failed',e);
+      const b=$('measurementButton'); if(b){b.disabled=false;b.textContent='全ピース自動計測';}
+      setStatus(`${VERSION} 計測完了 / ZIP生成エラー`);
+      return;
     }
+
+    title.textContent=`${VERSION} 計測完了（${state.images.length}ピース / run ${state.run}）`;
+    const a=document.createElement('a');
+    a.id='measurementDownload';
+    a.href=url;
+    a.download=fileName;
+    a.textContent=`${VERSION} 計測ZIPを保存`;
+    a.style.display='block';
+    a.style.textAlign='center';
+    a.style.fontWeight='700';
+    a.style.textDecoration='none';
+    a.style.padding='12px';
+    a.style.border='1px solid rgba(0,0,0,.25)';
+    a.style.borderRadius='10px';
+    a.style.background='#fff';
+    a.style.color='inherit';
+    result.appendChild(a);
+
     // iPhone/iPad: share the generated ZIP directly to the iOS Share Sheet.
-    // A Shortcuts share action can then upload the file to GitHub without exposing a token to the game.
-    let share=$('measurementShare');
-    if(!share){
-      share=document.createElement('button'); share.id='measurementShare'; share.type='button';
-      share.textContent='ZIPを共有（iPhone）'; share.style.display='block'; share.style.marginTop='8px';
-      const parent=a&&a.parentElement ? a.parentElement : $('measurementStatus')?.parentElement;
-      if(parent) parent.appendChild(share);
-    }
+    const share=document.createElement('button');
+    share.id='measurementShare'; share.type='button';
+    share.textContent='ZIPを共有（iPhone）';
+    share.style.display='block'; share.style.width='100%'; share.style.marginTop='8px';
+    share.style.minHeight='44px';
+    result.appendChild(share);
     share.onclick=async()=>{
       try{
         const file=new File([blob],fileName,{type:'application/zip'});
         if(!navigator.share || !navigator.canShare || !navigator.canShare({files:[file]})){
-          alert('このブラウザではZIPの共有に対応していません。下の「計測ZIPを保存」からFilesへ保存してください。'); return;
+          alert('このブラウザではZIPの共有に対応していません。「計測ZIPを保存」から保存してください。'); return;
         }
-        await navigator.share({title:`${VERSION} Run ${state.run} 計測ログ`,text:`${fileName}`,files:[file]});
+        await navigator.share({title:`${VERSION} Run ${state.run} 計測ログ`,text:fileName,files:[file]});
         const ss=$('measurementStatus'); if(ss) ss.textContent='共有シートを終了しました。ショートカットを選択した場合はGitHubへの保存処理が続きます。';
       }catch(e){ if(e&&e.name!=='AbortError') alert(`ZIP共有に失敗しました: ${e.message||e}`); }
     };
+
     const b=$('measurementButton');if(b){b.disabled=false;b.textContent='全ピース自動計測';}
-    setStatus(`${VERSION} 計測完了（${state.images.length}ピース / run ${state.run}）`); const ss=$('measurementStatus');if(ss)ss.textContent=`完了。下の「計測ZIPを保存」から保存できます。iPhoneでは「ZIPを共有（iPhone）」からショートカットへ渡せます。`;
+    setStatus(`${VERSION} 計測完了（${state.images.length}ピース / run ${state.run}）`);
+    const ss=$('measurementStatus');if(ss)ss.textContent=`完了。画面下部の「${VERSION} 計測ZIPを保存」から保存できます。iPhoneでは「ZIPを共有（iPhone）」も利用できます。`;
     const modal=$('modeModal');if(modal)modal.classList.remove('hidden');const normal=$('normalModeButton');if(normal)normal.disabled=false;const endless=$('endlessModeButton');if(endless)endless.disabled=false;
   }
 
@@ -583,6 +628,7 @@
     state.piece=null;state.body=null;state.running=true;
     const modal=$('modeModal'); if(modal) modal.classList.add('hidden');
     const a=$('measurementDownload'); if(a) a.classList.add('hidden');
+    const result=$('measurementResult'); if(result) result.remove();
     const b=$('measurementButton'); if(b)b.disabled=true;
     setStatus(`${VERSION} 計測開始…`);
     startPiece(0);
