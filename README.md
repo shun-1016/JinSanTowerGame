@@ -125,7 +125,7 @@ v1.37.3までのログでは、接触時の角速度変化について「Matter.
 - These rules affect measurement termination only; Matter.js physics parameters and physics behavior are unchanged.
 
 
-## v1.38.1
+## v1.38.2
 
 - 計測完了時のZIP自動ダウンロードを廃止し、「計測ZIPを保存」リンクをユーザー操作で保存する方式に変更。
 - iPhoneの「ZIPを共有（iPhone）」は維持。
@@ -136,3 +136,10 @@ v1.37.3までのログでは、接触時の角速度変化について「Matter.
 - `validation.csv` の静止・終了情報をピースごとに保存し、全37ピース終了後も各ピースの実績を正しく出力するよう修正。
 - `summary_*.csv` の `post_stable_frames` を `stable_confirmation_frames` に変更し、安定確認に使用した連続フレーム数を記録。
 - Matter.jsの物理パラメータ、狭接触角速度補正、接触判定・イベント診断ロジックは変更しない。
+
+
+### v1.38.2
+- ZIP保存UIを計測完了処理から独立した画面下部パネルとして表示。
+- ZIP生成前に完了パネルを表示し、ZIP生成・メタデータ生成で例外が発生した場合もエラーを画面表示。
+- 自動ダウンロードは使用しない。
+- 物理パラメータ、物理計算、静止判定条件は変更なし。
