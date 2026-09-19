@@ -2,7 +2,7 @@
 (() => {
   'use strict';
 
-  const VERSION = 'v1.38.2';
+  const VERSION = 'v1.38.3';
   const ASSET_PREFIX = 'assets/';
   const MAX_DISCOVERY = 999;
   // v1.38.0: measure each piece until it is stably at rest.
@@ -523,8 +523,8 @@
   function finishRun(){
     state.running=false; state.piece=null; state.body=null; clearDynamicBodies();
 
-    // Create the completion panel first. This makes the UI independent from
-    // metadata/ZIP generation and gives a visible diagnostic if export fails.
+    // Keep the completion panel independent from export processing so an export
+    // failure can be reported directly on the measurement screen.
     let result=$('measurementResult');
     if(!result){
       result=document.createElement('div');
@@ -541,39 +541,120 @@
 
     const fileName=`JinSanTowerGame_${VERSION}_run${state.run}_diagnostics.zip`;
     let blob=null, url='';
+    let exportStage='初期化';
+    let exportStats={
+      images:state.images.length,
+      allRows:state.allRows.length,
+      summaries:state.summaries.length,
+      contactEvents:state.contactEvents.length,
+      contactChanges:(state.contactChanges||[]).length,
+      contactLoops:(state.contactLoops||[]).length,
+      files:0,
+      csvChars:0
+    };
+    const setStage=(stage)=>{ exportStage=stage; };
+    const addFile=(files,name,header,rows)=>{
+      setStage(`${name} のCSV生成`);
+      const content=makeCsv(header,rows);
+      exportStats.csvChars+=content.length;
+      files.push({name,content});
+      exportStats.files=files.length;
+    };
+    const diagnosticText=(error)=>{
+      const lines=[
+        `${VERSION} export diagnostic`,
+        `stage=${exportStage}`,
+        `error_name=${error&&error.name?error.name:''}`,
+        `error_message=${error&&error.message?error.message:String(error)}`,
+        `images=${exportStats.images}`,
+        `allRows=${exportStats.allRows}`,
+        `summaries=${exportStats.summaries}`,
+        `contactEvents=${exportStats.contactEvents}`,
+        `contactChanges=${exportStats.contactChanges}`,
+        `contactLoops=${exportStats.contactLoops}`,
+        `files=${exportStats.files}`,
+        `csvChars=${exportStats.csvChars}`
+      ];
+      if(error&&error.stack) lines.push('',String(error.stack).slice(0,4000));
+      return lines.join('\n');
+    };
+
     try{
+      setStage('metadata.csv の元データ生成');
       const meta=metadataRows();
-      const files=[{name:'metadata.csv',content:makeCsv(meta.h,meta.rows)},{name:'validation.csv',content:makeCsv(validationHeader,validationRows())}];
-      const CHUNK_PIECES=5, summariesByPiece=new Map(), eventsByPiece=new Map(), changesByPiece=new Map(), loopsByPiece=new Map(), rawByPiece=new Map();
+      const files=[];
+      addFile(files,'metadata.csv',meta.h,meta.rows);
+      setStage('validation.csv の元データ生成');
+      addFile(files,'validation.csv',validationHeader,validationRows());
+
+      const CHUNK_PIECES=5;
+      const summariesByPiece=new Map(), eventsByPiece=new Map(), changesByPiece=new Map(), loopsByPiece=new Map(), rawByPiece=new Map();
+      setStage('ピース別データの振り分け');
       for(const row of state.summaries){const piece=Number(row[1]);if(Number.isInteger(piece)&&piece>0){if(!summariesByPiece.has(piece))summariesByPiece.set(piece,[]);summariesByPiece.get(piece).push(row);}}
       for(const row of state.contactEvents){const piece=Number(row[1]);if(Number.isInteger(piece)&&piece>0){if(!eventsByPiece.has(piece))eventsByPiece.set(piece,[]);eventsByPiece.get(piece).push(row);}}
       for(const row of (state.contactChanges||[])){const piece=Number(row[1]);if(Number.isInteger(piece)&&piece>0){if(!changesByPiece.has(piece))changesByPiece.set(piece,[]);changesByPiece.get(piece).push(row);}}
       for(const row of (state.contactLoops||[])){const piece=Number(row[1]);if(Number.isInteger(piece)&&piece>0){if(!loopsByPiece.has(piece))loopsByPiece.set(piece,[]);loopsByPiece.get(piece).push(row);}}
       for(const r of state.allRows){const piece=Number(r.split(',')[0]);if(Number.isInteger(piece)&&piece>0){if(!rawByPiece.has(piece))rawByPiece.set(piece,[]);rawByPiece.get(piece).push(r);}}
+
       for(let start=1;start<=state.images.length;start+=CHUNK_PIECES){
         const end=Math.min(start+CHUNK_PIECES-1,state.images.length),summaryRows=[],eventRows=[],changeRows=[],loopRows=[],frameRows=[];
-        for(let piece=start;piece<=end;piece++){summaryRows.push(...(summariesByPiece.get(piece)||[]));eventRows.push(...(eventsByPiece.get(piece)||[]));changeRows.push(...(changesByPiece.get(piece)||[]));loopRows.push(...(loopsByPiece.get(piece)||[]));frameRows.push(...selectCompactFrames(rawByPiece.get(piece)||[]));}
+        setStage(`ピース ${start}-${end} のCSVデータ抽出`);
+        for(let piece=start;piece<=end;piece++){
+          summaryRows.push(...(summariesByPiece.get(piece)||[]));
+          eventRows.push(...(eventsByPiece.get(piece)||[]));
+          changeRows.push(...(changesByPiece.get(piece)||[]));
+          loopRows.push(...(loopsByPiece.get(piece)||[]));
+          frameRows.push(...selectCompactFrames(rawByPiece.get(piece)||[]));
+        }
         const range=`${pad2(start)}-${pad2(end)}`;
-        files.push({name:`summary_${range}.csv`,content:makeCsv(summaryHeader,summaryRows)});
-        files.push({name:`contact_events_${range}.csv`,content:makeCsv(contactEventHeader,eventRows)});
-        files.push({name:`contact_changes_${range}.csv`,content:makeCsv(contactChangeHeader,changeRows)});
-        files.push({name:`contact_loops_${range}.csv`,content:makeCsv(contactLoopHeader,loopRows)});
-        files.push({name:`frames_${range}.csv`,content:makeCsv(frameHeader,frameRows)});
+        addFile(files,`summary_${range}.csv`,summaryHeader,summaryRows);
+        addFile(files,`contact_events_${range}.csv`,contactEventHeader,eventRows);
+        addFile(files,`contact_changes_${range}.csv`,contactChangeHeader,changeRows);
+        addFile(files,`contact_loops_${range}.csv`,contactLoopHeader,loopRows);
+        addFile(files,`frames_${range}.csv`,frameHeader,frameRows);
       }
-      const runFolder=`run${state.run}`; for(const f of files)f.name=`${runFolder}/${f.name}`;
+
+      setStage('ZIP内ファイル名の確定');
+      const runFolder=`run${state.run}`;
+      for(const f of files) f.name=`${runFolder}/${f.name}`;
+
+      setStage(`ZIPバイナリ生成（${files.length}ファイル / ${exportStats.csvChars}文字）`);
       blob=zip(files);
+      if(!blob || !blob.size) throw new Error('ZIP Blobが空です。');
+      exportStats.zipBytes=blob.size;
+
+      setStage('ZIP Blob URL生成');
       url=URL.createObjectURL(blob);
+      if(!url) throw new Error('ZIP Blob URLの生成に失敗しました。');
     }catch(e){
       const message=e&&e.message?e.message:String(e);
+      const diagnostic=diagnosticText(e);
       title.textContent=`${VERSION} 計測は完了しましたが、ZIP生成に失敗しました。`;
       const detail=document.createElement('div');
-      detail.textContent=`エラー: ${message}`;
       detail.style.fontSize='12px';
       detail.style.marginTop='4px';
+      detail.style.whiteSpace='pre-wrap';
+      detail.textContent=`発生箇所: ${exportStage}\nエラー: ${message}\nファイル数: ${exportStats.files}\nCSV文字数: ${exportStats.csvChars}`;
       result.appendChild(detail);
-      console.error('[measurement] export failed',e);
+
+      // Small text export for the failure case. This is intentionally separate
+      // from the ZIP path so the next run can report the exact failing stage.
+      try{
+        const diagBlob=new Blob([diagnostic],{type:'text/plain;charset=utf-8'});
+        const diagUrl=URL.createObjectURL(diagBlob);
+        const diag=document.createElement('a');
+        diag.href=diagUrl;
+        diag.download=`JinSanTowerGame_${VERSION}_run${state.run}_export_error.txt`;
+        diag.textContent='ZIP生成エラー診断を保存';
+        diag.style.display='block'; diag.style.marginTop='8px';
+        result.appendChild(diag);
+      }catch(diagError){
+        console.error('[measurement] diagnostic export failed',diagError);
+      }
+
+      console.error('[measurement] export failed',diagnostic,e);
       const b=$('measurementButton'); if(b){b.disabled=false;b.textContent='全ピース自動計測';}
-      setStatus(`${VERSION} 計測完了 / ZIP生成エラー`);
+      setStatus(`${VERSION} 計測完了 / ZIP生成エラー（${exportStage}）`);
       return;
     }
 
@@ -594,7 +675,6 @@
     a.style.color='inherit';
     result.appendChild(a);
 
-    // iPhone/iPad: share the generated ZIP directly to the iOS Share Sheet.
     const share=document.createElement('button');
     share.id='measurementShare'; share.type='button';
     share.textContent='ZIPを共有（iPhone）';
