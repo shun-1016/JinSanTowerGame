@@ -1,12 +1,20 @@
-/* v1.37.8 - contact-event angular ledger diagnostics / ZIP log export */
+/* v1.38.0 - stability-until-rest measurement / contact-event angular ledger diagnostics */
 (() => {
   'use strict';
 
-  const VERSION = 'v1.37.8';
+  const VERSION = 'v1.38.0';
   const ASSET_PREFIX = 'assets/';
   const MAX_DISCOVERY = 999;
-  const POST_LAND_FRAMES = 60;
-  const MAX_FALL_FRAMES = 600;
+  // v1.38.0: measure each piece until it is stably at rest.
+  // The physics simulation itself is unchanged; these values affect measurement
+  // termination only.
+  const MIN_POST_LAND_FRAMES = 60;
+  const STABLE_REQUIRED_FRAMES = 30;
+  const POST_STABLE_FRAMES = 30;
+  const MAX_POST_LAND_FRAMES = 600;
+  const STABLE_VX_THRESHOLD = 0.01;
+  const STABLE_VY_THRESHOLD = 0.01;
+  const STABLE_ANGULAR_VELOCITY_THRESHOLD = 0.01;
   const BASE_WIDTH_RATIO = 0.82;
 
   // v1.37.1: contact-loop diagnostics.
@@ -42,7 +50,7 @@
   const summaryHeader = [
     'run','piece','compound_mode','status','frame_count','landing_frame','post_land_frame_count','mass','inertia','com_offset_px','footprint_width_px','contact_points','contact_parts',
     'landing_angle','landing_pre_vx','landing_pre_vy','landing_pre_angular_velocity','landing_solver_angular_velocity','landing_solver_delta_angular_velocity','landing_correction_delta_angular_velocity','landing_total_delta_angular_velocity','landing_vx','landing_vy','landing_angular_velocity','landing_delta_vx','landing_delta_vy','landing_delta_angular_velocity',
-    'max_post_land_abs_vx','max_post_land_abs_vy','max_post_land_abs_angular_velocity','post_land_x_range','post_land_y_range','post_land_angle_range','max_bounce_height_px','sleep_frame','final_sleeping','final_ground_contact',
+    'max_post_land_abs_vx','max_post_land_abs_vy','max_post_land_abs_angular_velocity','post_land_x_range','post_land_y_range','post_land_angle_range','max_bounce_height_px','sleep_frame','final_sleeping','final_ground_contact','stable_frame','stable_confirmed','stable_required_frames','post_stable_frames','measurement_end_frame','measurement_end_reason',
     'physics_parts','triangles','regions','raw_regions','contour_vertices','landing_contact_left_offset_px','landing_contact_right_offset_px','landing_contact_normal_angle_rad','landing_contact_torque_proxy',
     'landing_contact_parts_detail','landing_contact_offsets_xy_px','landing_contact_torque_proxies','landing_contact_world_xy_px','landing_contact_relative_xy_px','landing_contact_normal_xy','landing_contact_omega_cross_r_px_per_frame','landing_contact_point_velocity_px_per_frame',
     'narrow_landing_correction_latched','narrow_landing_contact_width_latched_px','narrow_landing_contact_source_latched','narrow_landing_contact_offset_latched_px','narrow_landing_angular_before_latched','narrow_landing_angular_delta_latched','narrow_landing_angular_after_latched','narrow_landing_correction_applied_latched',
@@ -65,7 +73,7 @@
   // while preserving the causal sequence inside long contact events.
   const contactChangeHeader = ['run','piece','event_index','change_index','substep','reason','part_ids','contact_width_px','contact_offset_px','vx_before','vx_after','delta_vx','vy_before','vy_after','delta_vy','angular_before','angular_after','delta_angular','solver_delta_angular','correction_delta_angular','total_delta_angular','delta_vn','delta_vt','x','angle','cumulative_delta_x','cumulative_delta_angle','contact_points','support_count'];
 
-  const validationHeader = ['run','piece','status','raw_row_count','landing_frame','expected_row_count','row_count_ok','landing_present','post_land_60_ok'];
+  const validationHeader = ['run','piece','status','raw_row_count','landing_frame','stable_frame','measurement_end_frame','expected_row_count','row_count_ok','landing_present','stable_confirmed','post_stable_frames','measurement_end_reason'];
 
   // One row per re-contact transition. This is intentionally derived from
   // continuous contact events, so it exposes the sequence:
@@ -91,7 +99,10 @@
   const state = {
     measurementConfig: null,
     images: [], run: 1, index: 0, frame: 0, startedAt: 0, landingFrame: null, rows: [], allRows: [], summaries: [],
-    stageW: 390, stageH: 500, baseWidth: 0, piece: null, body: null, running: false, landingContactDetail: null, landingOtherDynamicBodyIds: [], contactEvents: [], contactChanges: [], contactLoops: []
+    stageW: 390, stageH: 500, baseWidth: 0, piece: null, body: null, running: false,
+    landingContactDetail: null, landingOtherDynamicBodyIds: [], contactEvents: [], contactChanges: [], contactLoops: [],
+    stableFrame: null, stableConsecutiveFrames: 0, stableConfirmed: false, measurementEndFrame: null,
+    measurementEndReason: '', postStableStartFrame: null
   };
 
   async function loadImage(n){
@@ -161,7 +172,10 @@
     for(let f=0;f<parsed.length;f+=10)keep.add(f);
     for(let f=0;f<Math.min(10,parsed.length);f++)keep.add(f);
     if(Number.isFinite(lf))for(let f=Math.max(0,lf-2);f<=lf+POST_LAND_FRAMES;f++)keep.add(f);
-    keep.add(parsed.length-1); return parsed.filter(a=>keep.has(Number(a[fi]))).map(compactFrameRow);
+    keep.add(parsed.length-1);
+    const tailStart=Math.max(0,parsed.length-POST_STABLE_FRAMES-5);
+    for(let f=tailStart;f<parsed.length;f++)keep.add(f);
+    return parsed.filter(a=>keep.has(Number(a[fi]))).map(compactFrameRow);
   }
 
 
@@ -223,7 +237,7 @@
     return rows;
   }
 
-  function finishPiece(status){
+  function finishPiece(status, endReason=''){
     if(state.body && Physics.finalizeGroundContactHistory) Physics.finalizeGroundContactHistory(state.body);
     const p=state.body&&state.body.plugin?state.body.plugin:{};
     const arr=parseRows(state.rows); const first=arr[0]||[]; const land=state.landingFrame===null?arr[0]:arr[Math.min(state.landingFrame,Math.max(0,arr.length-1))]||arr[0];
@@ -252,6 +266,12 @@
       vxs.length?Math.max(...vxs.map(Math.abs)):NaN,vys.length?Math.max(...vys.map(Math.abs)):NaN,avs.length?Math.max(...avs.map(Math.abs)):NaN,
       xs.length?Math.max(...xs)-Math.min(...xs):NaN,ys.length?Math.max(...ys)-Math.min(...ys):NaN,angs.length?Math.max(...angs)-Math.min(...angs):NaN,
       maxBounce,sleepFrame,last[colIndex('sleeping')]==='1'?1:0,last[colIndex('ground_contact')]==='1'?1:0,
+      state.stableFrame===null?'':state.stableFrame,state.stableConfirmed?1:0,STABLE_REQUIRED_FRAMES,
+      state.stableConfirmed&&state.stableFrame!==null&&state.measurementEndFrame!==null
+        ? Math.max(0,state.measurementEndFrame-state.stableFrame)
+        : 0,
+      state.measurementEndFrame===null?'':state.measurementEndFrame,
+      endReason||state.measurementEndReason||'',
       Number(firstDiag[colIndex('physics_parts')]),Number(firstDiag[colIndex('triangles')]),Number(firstDiag[colIndex('regions')]),Number(firstDiag[colIndex('raw_regions')]),Number(firstDiag[colIndex('contour_vertices')]),
       Number(land?.[colIndex('contact_left_offset_px')]),Number(land?.[colIndex('contact_right_offset_px')]),Number(land?.[colIndex('contact_normal_angle_rad')]),Number(land?.[colIndex('contact_torque_proxy')]),
       (state.landingContactDetail||[]).map(c=>String(c.partId)).join(';'),
@@ -315,7 +335,10 @@
     p.body.plugin.groundContactEvents=[];
     p.body.plugin.groundContactEventChangePoints=[];
     Physics.add(p.body); Physics.hold(p.body,x,y,0); Physics.release(p.body);
-    state.index=index; state.frame=0; state.startedAt=performance.now(); state.landingFrame=null; state.landingContactDetail=null; state.landingOtherDynamicBodyIds=[]; state.rows=[]; state.piece=p; state.body=p.body;
+    state.index=index; state.frame=0; state.startedAt=performance.now(); state.landingFrame=null;
+    state.stableFrame=null; state.stableConsecutiveFrames=0; state.stableConfirmed=false;
+    state.measurementEndFrame=null; state.measurementEndReason=''; state.postStableStartFrame=null;
+    state.landingContactDetail=null; state.landingOtherDynamicBodyIds=[]; state.rows=[]; state.piece=p; state.body=p.body;
   }
 
   function observeFrame(){
@@ -330,11 +353,68 @@
         .map(b=>b.id)
         .filter(v=>v!==undefined);
     }
+
     const phase=state.landingFrame===null?'falling':'post_landing';
     state.rows.push(rowFor(body,phase));
 
-    if(state.landingFrame!==null && state.frame-state.landingFrame>=POST_LAND_FRAMES){
-      finishPiece('complete');
+    if(state.landingFrame!==null){
+      const postLandFrames=state.frame-state.landingFrame;
+      const motionStable=contact && (
+        body.isSleeping ||
+        (
+          Math.abs(body.velocity.x)<=STABLE_VX_THRESHOLD &&
+          Math.abs(body.velocity.y)<=STABLE_VY_THRESHOLD &&
+          Math.abs(body.angularVelocity)<=STABLE_ANGULAR_VELOCITY_THRESHOLD
+        )
+      );
+
+      // A transient low-velocity frame is not enough. The same piece must
+      // satisfy the stability condition continuously for STABLE_REQUIRED_FRAMES.
+      if(postLandFrames>=MIN_POST_LAND_FRAMES && motionStable){
+        if(state.stableConsecutiveFrames===0) state.stableFrame=state.frame;
+        state.stableConsecutiveFrames++;
+      }else{
+        state.stableConsecutiveFrames=0;
+        state.stableFrame=null;
+      }
+
+      if(state.stableConsecutiveFrames>=STABLE_REQUIRED_FRAMES){
+        state.stableConfirmed=true;
+        if(state.postStableStartFrame===null) state.postStableStartFrame=state.frame;
+
+        const postStableFrames=state.frame-state.postStableStartFrame;
+        if(postStableFrames>=POST_STABLE_FRAMES){
+          state.measurementEndFrame=state.frame;
+          state.measurementEndReason='stable_confirmed';
+          finishPiece('complete','stable_confirmed');
+          if(state.index+1<state.images.length){
+            setStatus(`${VERSION} 計測中: ${state.index+2}/${state.images.length}`);
+            startPiece(state.index+1);
+          }else{
+            finishRun();
+            return;
+          }
+          return;
+        }
+      }
+
+      if(postLandFrames>=MAX_POST_LAND_FRAMES){
+        state.measurementEndFrame=state.frame;
+        state.measurementEndReason=state.stableConfirmed?'max_post_land_after_stable':'max_post_land_timeout';
+        finishPiece(state.stableConfirmed?'complete':'timeout',state.measurementEndReason);
+        if(state.index+1<state.images.length){
+          setStatus(`${VERSION} 計測中: ${state.index+2}/${state.images.length}`);
+          startPiece(state.index+1);
+        }else{
+          finishRun();
+          return;
+        }
+        return;
+      }
+    }else if(state.frame>=MAX_POST_LAND_FRAMES){
+      state.measurementEndFrame=state.frame;
+      state.measurementEndReason='fall_timeout';
+      finishPiece('timeout','fall_timeout');
       if(state.index+1<state.images.length){
         setStatus(`${VERSION} 計測中: ${state.index+2}/${state.images.length}`);
         startPiece(state.index+1);
@@ -342,18 +422,10 @@
         finishRun();
         return;
       }
-    }else if(state.frame>=MAX_FALL_FRAMES){
-      finishPiece('timeout');
-      if(state.index+1<state.images.length){
-        setStatus(`${VERSION} 計測中: ${state.index+2}/${state.images.length}`);
-        startPiece(state.index+1);
-      }else{
-        finishRun();
-        return;
-      }
-    }else{
-      state.frame++;
+      return;
     }
+
+    state.frame++;
   }
 
   function installGameLoopHooks(){
@@ -394,13 +466,33 @@
 
   function validationRows(){
     const map=new Map();
-    for(const row of state.allRows){ const p=Number(row.split(',')[0]); if(!map.has(p)) map.set(p,[]); map.get(p).push(row); }
+    for(const row of state.allRows){
+      const p=Number(row.split(',')[0]);
+      if(!map.has(p)) map.set(p,[]);
+      map.get(p).push(row);
+    }
     const rows=[];
     for(let i=1;i<=state.images.length;i++){
-      const rs=map.get(i)||[]; const parsed=parseRows(rs); const land=parsed.find(a=>a[colIndex('ground_contact')]==='1'); const lf=land?Number(land[colIndex('frame')]):'';
-      rows.push([state.run,i,rs.length?'complete':'missing',rs.length,lf,lf===''?'':lf+POST_LAND_FRAMES+1,rs.length>0,lf!=='',lf!==''&&rs.length>=lf+POST_LAND_FRAMES+1]);
+      const rs=map.get(i)||[];
+      const parsed=parseRows(rs);
+      const land=parsed.find(a=>a[colIndex('ground_contact')]==='1');
+      const lf=land?Number(land[colIndex('frame')]):'';
+      const sleep=parsed.find(a=>Number(a[colIndex('sleeping')])===1);
+      const stableCandidate=parsed.length && state.index+1===i ? state.stableFrame : '';
+      const endFrame=parsed.length ? Number(parsed[parsed.length-1][colIndex('frame')]) : '';
+      const stableConfirmed=(state.index+1===i) ? state.stableConfirmed : false;
+      const endReason=(state.index+1===i) ? state.measurementEndReason : '';
+      const postStableFrames=(stableConfirmed && stableCandidate!==null && stableCandidate!=='')
+        ? Math.max(0,endFrame-stableCandidate) : 0;
+      rows.push([
+        state.run,i,rs.length?'complete':'missing',rs.length,lf,
+        stableCandidate===null?'':stableCandidate,endFrame,
+        rs.length?endFrame+1:'',
+        rs.length>0,lf!=='',stableConfirmed,postStableFrames,endReason
+      ]);
     }
-    rows.push([state.run,'RUN_TOTAL',state.images.length===rows.length?'complete':'incomplete',state.allRows.length,'','','','','']); return rows;
+    rows.push([state.run,'RUN_TOTAL',state.images.length===rows.length?'complete':'incomplete',state.allRows.length,'','','','','','','','','']);
+    return rows;
   }
 
   function crc32(bytes){ let crc=0xffffffff; for(let i=0;i<bytes.length;i++){ crc^=bytes[i]; for(let j=0;j<8;j++) crc=(crc>>>1)^((crc&1)?0xedb88320:0); } return (crc^0xffffffff)>>>0; }
@@ -464,7 +556,9 @@
     const run=prompt(`${VERSION} 自動計測\n今回のRun番号を入力してください（例: 1）`,String(state.run));
     if(run===null) return;
     const n=parseInt(run,10); if(!Number.isInteger(n)||n<1){ alert('Run番号は1以上の整数を入力してください。'); return; }
-    state.run=n; state.index=0;state.frame=0;state.rows=[];state.allRows=[];state.summaries=[];state.contactEvents=[];state.contactChanges=[];state.contactLoops=[];state.piece=null;state.body=null;state.running=true;
+    state.run=n; state.index=0;state.frame=0;state.rows=[];state.allRows=[];state.summaries=[];state.contactEvents=[];state.contactChanges=[];state.contactLoops=[];
+    state.stableFrame=null;state.stableConsecutiveFrames=0;state.stableConfirmed=false;state.measurementEndFrame=null;state.measurementEndReason='';state.postStableStartFrame=null;
+    state.piece=null;state.body=null;state.running=true;
     const modal=$('modeModal'); if(modal) modal.classList.add('hidden');
     const a=$('measurementDownload'); if(a) a.classList.add('hidden');
     const b=$('measurementButton'); if(b)b.disabled=true;
