@@ -123,3 +123,16 @@ v1.37.3までのログでは、接触時の角速度変化について「Matter.
 - Stability must persist for 30 frames, followed by 30 additional post-stability frames.
 - Maximum post-landing measurement: 600 frames.
 - These rules affect measurement termination only; Matter.js physics parameters and physics behavior are unchanged.
+
+
+## v1.38.1
+
+- 計測完了時のZIP自動ダウンロードを廃止し、「計測ZIPを保存」リンクをユーザー操作で保存する方式に変更。
+- iPhoneの「ZIPを共有（iPhone）」は維持。
+- 着地後の最低計測を60フレームから30フレームへ短縮。
+- 静止条件の連続確認を30フレームから20フレームへ短縮。
+- 静止確認後の追加30フレーム計測を廃止し、20フレーム連続安定を確認した時点で計測終了。
+- 最大着地後計測600フレームは安全弁として維持。
+- `validation.csv` の静止・終了情報をピースごとに保存し、全37ピース終了後も各ピースの実績を正しく出力するよう修正。
+- `summary_*.csv` の `post_stable_frames` を `stable_confirmation_frames` に変更し、安定確認に使用した連続フレーム数を記録。
+- Matter.jsの物理パラメータ、狭接触角速度補正、接触判定・イベント診断ロジックは変更しない。
