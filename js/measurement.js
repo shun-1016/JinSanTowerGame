@@ -1,8 +1,8 @@
-/* v1.38.1 - stability-until-rest measurement / reliable ZIP save diagnostics */
+/* v1.38.5 - stability-until-rest measurement / sleep-after-ground-contact detection */
 (() => {
   'use strict';
 
-  const VERSION = 'v1.38.4';
+  const VERSION = 'v1.38.5';
   const ASSET_PREFIX = 'assets/';
   const MAX_DISCOVERY = 999;
   // v1.38.0: measure each piece until it is stably at rest.
@@ -11,6 +11,11 @@
   const MIN_POST_LAND_FRAMES = 30;
   const STABLE_REQUIRED_FRAMES = 20;
   const MAX_POST_LAND_FRAMES = 600;
+  // Matter.js sleep can make the active ground-contact pair disappear even though
+  // the piece has physically settled. Allow a small substep gap between the last
+  // recorded ground-contact event and the observed sleep state.
+  const MEASUREMENT_SUBSTEPS = 4;
+  const SLEEP_GROUND_CONTACT_MAX_GAP_SUBSTEPS = 4;
   const STABLE_VX_THRESHOLD = 0.01;
   const STABLE_VY_THRESHOLD = 0.01;
   const STABLE_ANGULAR_VELOCITY_THRESHOLD = 0.01;
@@ -49,7 +54,7 @@
   const summaryHeader = [
     'run','piece','compound_mode','status','frame_count','landing_frame','post_land_frame_count','mass','inertia','com_offset_px','footprint_width_px','contact_points','contact_parts',
     'landing_angle','landing_pre_vx','landing_pre_vy','landing_pre_angular_velocity','landing_solver_angular_velocity','landing_solver_delta_angular_velocity','landing_correction_delta_angular_velocity','landing_total_delta_angular_velocity','landing_vx','landing_vy','landing_angular_velocity','landing_delta_vx','landing_delta_vy','landing_delta_angular_velocity',
-    'max_post_land_abs_vx','max_post_land_abs_vy','max_post_land_abs_angular_velocity','post_land_x_range','post_land_y_range','post_land_angle_range','max_bounce_height_px','sleep_frame','final_sleeping','final_ground_contact','stable_frame','stable_confirmed','stable_required_frames','stable_confirmation_frames','measurement_end_frame','measurement_end_reason',
+    'max_post_land_abs_vx','max_post_land_abs_vy','max_post_land_abs_angular_velocity','post_land_x_range','post_land_y_range','post_land_angle_range','max_bounce_height_px','sleep_frame','final_sleeping','final_ground_contact','stable_frame','stable_confirmed','stable_required_frames','stable_confirmation_frames','measurement_end_frame','measurement_end_reason','stable_detection_mode','sleep_ground_contact_end_substep','sleep_ground_contact_gap_substeps','sleep_stable_confirmation_frame',
     'physics_parts','triangles','regions','raw_regions','contour_vertices','landing_contact_left_offset_px','landing_contact_right_offset_px','landing_contact_normal_angle_rad','landing_contact_torque_proxy',
     'landing_contact_parts_detail','landing_contact_offsets_xy_px','landing_contact_torque_proxies','landing_contact_world_xy_px','landing_contact_relative_xy_px','landing_contact_normal_xy','landing_contact_omega_cross_r_px_per_frame','landing_contact_point_velocity_px_per_frame',
     'narrow_landing_correction_latched','narrow_landing_contact_width_latched_px','narrow_landing_contact_source_latched','narrow_landing_contact_offset_latched_px','narrow_landing_angular_before_latched','narrow_landing_angular_delta_latched','narrow_landing_angular_after_latched','narrow_landing_correction_applied_latched',
@@ -101,7 +106,10 @@
     stageW: 390, stageH: 500, baseWidth: 0, piece: null, body: null, running: false,
     landingContactDetail: null, landingOtherDynamicBodyIds: [], contactEvents: [], contactChanges: [], contactLoops: [],
     stableFrame: null, stableConsecutiveFrames: 0, stableConfirmed: false, measurementEndFrame: null,
-    measurementEndReason: '', postStableStartFrame: null, pieceResults: new Map()
+    measurementEndReason: '', postStableStartFrame: null,
+    sleepStableConsecutiveFrames: 0, sleepStableFrame: null, sleepStableGroundContactEndSubstep: null,
+    sleepStableGroundContactGapSubsteps: null, sleepStableConfirmationFrame: null,
+    stableDetectionMode: '', pieceResults: new Map()
   };
 
   async function loadImage(n){
@@ -135,6 +143,20 @@
   }
 
   function groundContact(body){ return window.JinSanMeasurementContact.groundContact(body); }
+
+  function getSleepStableGroundContactInfo(body){
+    const events=body?.plugin?.groundContactEvents||[];
+    if(!events.length) return null;
+    const last=events[events.length-1];
+    const endSubstep=Number(last.endSubstep);
+    const sleepSubstep=state.frame*MEASUREMENT_SUBSTEPS;
+    const gapSubsteps=sleepSubstep-endSubstep;
+    if(!Number.isFinite(endSubstep) || !Number.isFinite(gapSubsteps) ||
+       gapSubsteps<0 || gapSubsteps>SLEEP_GROUND_CONTACT_MAX_GAP_SUBSTEPS){
+      return null;
+    }
+    return {endSubstep,gapSubsteps};
+  }
 
   function contactGeometry(body){ return window.JinSanMeasurementContact.contactGeometry(body, state.stageH); }
 
@@ -248,7 +270,11 @@
       measurementEndReason: endReason||state.measurementEndReason||'',
       stableConfirmationFrames: state.stableConfirmed&&state.stableFrame!==null&&state.measurementEndFrame!==null
         ? Math.max(0,state.measurementEndFrame-state.stableFrame+1)
-        : 0
+        : 0,
+      stableDetectionMode: state.stableDetectionMode||'',
+      sleepStableGroundContactEndSubstep: state.sleepStableGroundContactEndSubstep,
+      sleepStableGroundContactGapSubsteps: state.sleepStableGroundContactGapSubsteps,
+      sleepStableConfirmationFrame: state.sleepStableConfirmationFrame
     });
     if(state.body && Physics.finalizeGroundContactHistory) Physics.finalizeGroundContactHistory(state.body);
     const p=state.body&&state.body.plugin?state.body.plugin:{};
@@ -284,6 +310,10 @@
         : 0,
       state.measurementEndFrame===null?'':state.measurementEndFrame,
       endReason||state.measurementEndReason||'',
+      state.stableDetectionMode||'',
+      state.sleepStableGroundContactEndSubstep===null?'':state.sleepStableGroundContactEndSubstep,
+      state.sleepStableGroundContactGapSubsteps===null?'':state.sleepStableGroundContactGapSubsteps,
+      state.sleepStableConfirmationFrame===null?'':state.sleepStableConfirmationFrame,
       Number(firstDiag[colIndex('physics_parts')]),Number(firstDiag[colIndex('triangles')]),Number(firstDiag[colIndex('regions')]),Number(firstDiag[colIndex('raw_regions')]),Number(firstDiag[colIndex('contour_vertices')]),
       Number(land?.[colIndex('contact_left_offset_px')]),Number(land?.[colIndex('contact_right_offset_px')]),Number(land?.[colIndex('contact_normal_angle_rad')]),Number(land?.[colIndex('contact_torque_proxy')]),
       (state.landingContactDetail||[]).map(c=>String(c.partId)).join(';'),
@@ -350,6 +380,9 @@
     state.index=index; state.frame=0; state.startedAt=performance.now(); state.landingFrame=null;
     state.stableFrame=null; state.stableConsecutiveFrames=0; state.stableConfirmed=false;
     state.measurementEndFrame=null; state.measurementEndReason=''; state.postStableStartFrame=null;
+    state.sleepStableConsecutiveFrames=0; state.sleepStableFrame=null;
+    state.sleepStableGroundContactEndSubstep=null; state.sleepStableGroundContactGapSubsteps=null;
+    state.sleepStableConfirmationFrame=null; state.stableDetectionMode='';
     state.landingContactDetail=null; state.landingOtherDynamicBodyIds=[]; state.rows=[]; state.piece=p; state.body=p.body;
   }
 
@@ -380,9 +413,15 @@
         )
       );
 
-      // v1.38.1: after a minimum post-landing observation window,
-      // terminate as soon as the same stable condition has persisted
-      // continuously for STABLE_REQUIRED_FRAMES. No extra tail is added.
+      // v1.38.5: Matter.js may mark a settled body as sleeping. Once sleeping,
+      // Detector treats the sleeping body like a static body, so the active
+      // ground-contact pair can disappear even though the piece has not moved.
+      // Use the recorded ground-contact event immediately before sleep as the
+      // physical-contact evidence, but require continuous sleep for the same
+      // STABLE_REQUIRED_FRAMES window. Waking resets this path.
+      const sleepContactInfo=body.isSleeping ? getSleepStableGroundContactInfo(body) : null;
+      const sleepStable=postLandFrames>=MIN_POST_LAND_FRAMES && body.isSleeping && !!sleepContactInfo;
+
       if(postLandFrames>=MIN_POST_LAND_FRAMES && motionStable){
         if(state.stableConsecutiveFrames===0) state.stableFrame=state.frame;
         state.stableConsecutiveFrames++;
@@ -392,8 +431,32 @@
         state.postStableStartFrame=null;
       }
 
-      if(state.stableConsecutiveFrames>=STABLE_REQUIRED_FRAMES){
+      if(sleepStable){
+        if(state.sleepStableConsecutiveFrames===0){
+          state.sleepStableFrame=state.frame;
+          state.sleepStableGroundContactEndSubstep=sleepContactInfo.endSubstep;
+          state.sleepStableGroundContactGapSubsteps=sleepContactInfo.gapSubsteps;
+        }
+        state.sleepStableConsecutiveFrames++;
+      }else{
+        state.sleepStableConsecutiveFrames=0;
+        state.sleepStableFrame=null;
+        state.sleepStableGroundContactEndSubstep=null;
+        state.sleepStableGroundContactGapSubsteps=null;
+      }
+
+      const contactMotionConfirmed=state.stableConsecutiveFrames>=STABLE_REQUIRED_FRAMES;
+      const sleepConfirmed=state.sleepStableConsecutiveFrames>=STABLE_REQUIRED_FRAMES;
+
+      if(contactMotionConfirmed || sleepConfirmed){
         state.stableConfirmed=true;
+        state.stableDetectionMode=sleepConfirmed && !contactMotionConfirmed
+          ? 'SLEEP_AFTER_GROUND_CONTACT'
+          : 'CONTACT_MOTION';
+        if(sleepConfirmed && !contactMotionConfirmed){
+          state.stableFrame=state.sleepStableFrame;
+          state.sleepStableConfirmationFrame=state.frame;
+        }
         state.postStableStartFrame=state.stableFrame;
         state.measurementEndFrame=state.frame;
         state.measurementEndReason='stable_confirmed';
@@ -786,6 +849,7 @@
     const n=parseInt(run,10); if(!Number.isInteger(n)||n<1){ alert('Run番号は1以上の整数を入力してください。'); return; }
     state.run=n; state.index=0;state.frame=0;state.rows=[];state.allRows=[];state.summaries=[];state.contactEvents=[];state.contactChanges=[];state.contactLoops=[];state.pieceResults=new Map();
     state.stableFrame=null;state.stableConsecutiveFrames=0;state.stableConfirmed=false;state.measurementEndFrame=null;state.measurementEndReason='';state.postStableStartFrame=null;
+    state.sleepStableConsecutiveFrames=0;state.sleepStableFrame=null;state.sleepStableGroundContactEndSubstep=null;state.sleepStableGroundContactGapSubsteps=null;state.sleepStableConfirmationFrame=null;state.stableDetectionMode='';
     state.piece=null;state.body=null;state.running=true;
     const modal=$('modeModal'); if(modal) modal.classList.add('hidden');
     const a=$('measurementDownload'); if(a) a.classList.add('hidden');
