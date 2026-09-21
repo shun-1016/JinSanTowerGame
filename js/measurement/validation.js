@@ -1,9 +1,9 @@
-/* v1.39.0 - measurement validation */
+/* v1.39.1 - measurement validation */
 (() => {
   'use strict';
   const api={};
   api.create=function(ctx){
-    const {state,csvHeader,colIndex}=ctx;
+    const {state,csvHeader,parseRows,colIndex}=ctx;
   function validationRows(){
     const map=new Map();
     for(const row of state.allRows){

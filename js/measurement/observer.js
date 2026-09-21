@@ -1,9 +1,9 @@
-/* v1.39.0 - per-frame measurement observer */
+/* v1.39.1 - per-frame measurement observer */
 (() => {
   'use strict';
   const api={};
   api.create=function(ctx){
-    const {state,VERSION,Renderer,setStatus,groundContact,contactGeometry,rowFor,finishPiece,startPiece,finishRun,MIN_POST_LAND_FRAMES,STABLE_REQUIRED_FRAMES,MAX_POST_LAND_FRAMES,STABLE_VX_THRESHOLD,STABLE_VY_THRESHOLD,STABLE_ANGULAR_VELOCITY_THRESHOLD,MEASUREMENT_SUBSTEPS,SLEEP_GROUND_CONTACT_MAX_GAP_SUBSTEPS,Game}=ctx;
+    const {state,VERSION,Renderer,Physics,setStatus,groundContact,contactGeometry,rowFor,finishPiece,startPiece,finishRun,MIN_POST_LAND_FRAMES,STABLE_REQUIRED_FRAMES,MAX_POST_LAND_FRAMES,STABLE_VX_THRESHOLD,STABLE_VY_THRESHOLD,STABLE_ANGULAR_VELOCITY_THRESHOLD,MEASUREMENT_SUBSTEPS,SLEEP_GROUND_CONTACT_MAX_GAP_SUBSTEPS,Game}=ctx;
   function observeFrame(){
     if(!state.running || !state.body) return;
     const body=state.body;
