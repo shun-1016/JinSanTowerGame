@@ -1,8 +1,8 @@
-/* v1.39.1 - measurement modules split / stability behavior unchanged */
+/* v1.39.2 - measurement modules split / stability behavior unchanged */
 (() => {
   'use strict';
 
-  const VERSION = 'v1.39.1';
+  const VERSION = 'v1.39.2';
   const ASSET_PREFIX = 'assets/';
   const MAX_DISCOVERY = 999;
   // v1.38.0: measure each piece until it is stably at rest.
@@ -290,7 +290,7 @@
   }
 
 
-  // v1.39.1: measurement responsibilities are split into dedicated modules.
+  // v1.39.2: measurement responsibilities are split into dedicated modules.
   // The modules receive the existing measurement state/helpers; physics behavior
   // and measurement criteria are intentionally unchanged from v1.38.7.
   const finishPieceModule=window.JinSanMeasurementSummary.create({
