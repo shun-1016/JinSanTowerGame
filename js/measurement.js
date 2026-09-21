@@ -1,8 +1,8 @@
-/* v1.38.5 - stability-until-rest measurement / sleep-after-ground-contact detection */
+/* v1.38.6 - stability-until-rest measurement / sleep-after-ground-contact detection */
 (() => {
   'use strict';
 
-  const VERSION = 'v1.38.5';
+  const VERSION = 'v1.38.6';
   const ASSET_PREFIX = 'assets/';
   const MAX_DISCOVERY = 999;
   // v1.38.0: measure each piece until it is stably at rest.
@@ -152,7 +152,7 @@
     const sleepSubstep=state.frame*MEASUREMENT_SUBSTEPS;
     const gapSubsteps=sleepSubstep-endSubstep;
     if(!Number.isFinite(endSubstep) || !Number.isFinite(gapSubsteps) ||
-       gapSubsteps<0 || gapSubsteps>SLEEP_GROUND_CONTACT_MAX_GAP_SUBSTEPS){
+       Math.abs(gapSubsteps)>SLEEP_GROUND_CONTACT_MAX_GAP_SUBSTEPS){
       return null;
     }
     return {endSubstep,gapSubsteps};
@@ -413,7 +413,7 @@
         )
       );
 
-      // v1.38.5: Matter.js may mark a settled body as sleeping. Once sleeping,
+      // v1.38.6: Matter.js may mark a settled body as sleeping. Once sleeping,
       // Detector treats the sleeping body like a static body, so the active
       // ground-contact pair can disappear even though the piece has not moved.
       // Use the recorded ground-contact event immediately before sleep as the
