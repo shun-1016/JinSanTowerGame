@@ -1,4 +1,4 @@
-/* v1.39.2 - measurement validation */
+/* v1.39.3 - measurement validation */
 (() => {
   'use strict';
   const api={};

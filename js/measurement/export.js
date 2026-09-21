@@ -1,9 +1,9 @@
-/* v1.39.2 - CSV/ZIP export and completion UI */
+/* v1.39.3 - CSV/ZIP export and completion UI */
 (() => {
   'use strict';
   const api={};
   api.create=function(ctx){
-    const {state,VERSION,$,pad2,num,validationHeader,validationRows,setupPhysics,clearDynamicBodies,Piece}=ctx;
+    const {state,VERSION,$,pad2,num,validationHeader,validationRows,setupPhysics,clearDynamicBodies,Piece,selectCompactFrames}=ctx;
   function csvLine(values){ return values.map(v=>{ const s=String(v??''); return /[,\"\r\n]/.test(s)?`"${s.replace(/"/g,'""')}"`:s; }).join(','); }
   function makeCsv(header,rows){ return '\ufeff'+header.join(',')+'\n'+rows.map(r=>csvLine(r)).join('\n')+'\n'; }
 
