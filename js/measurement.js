@@ -1,8 +1,8 @@
-/* v1.38.6 - stability-until-rest measurement / sleep-after-ground-contact detection */
+/* v1.38.7 - stability-until-rest measurement / latched sleep-after-ground-contact detection */
 (() => {
   'use strict';
 
-  const VERSION = 'v1.38.6';
+  const VERSION = 'v1.38.7';
   const ASSET_PREFIX = 'assets/';
   const MAX_DISCOVERY = 999;
   // v1.38.0: measure each piece until it is stably at rest.
@@ -413,14 +413,29 @@
         )
       );
 
-      // v1.38.6: Matter.js may mark a settled body as sleeping. Once sleeping,
+      // v1.38.7: Matter.js may mark a settled body as sleeping. Once sleeping,
       // Detector treats the sleeping body like a static body, so the active
       // ground-contact pair can disappear even though the piece has not moved.
       // Use the recorded ground-contact event immediately before sleep as the
       // physical-contact evidence, but require continuous sleep for the same
       // STABLE_REQUIRED_FRAMES window. Waking resets this path.
-      const sleepContactInfo=body.isSleeping ? getSleepStableGroundContactInfo(body) : null;
-      const sleepStable=postLandFrames>=MIN_POST_LAND_FRAMES && body.isSleeping && !!sleepContactInfo;
+      // The substep-gap check is only the entry condition for this path.
+      // Once sleep-after-ground-contact is latched, do not re-evaluate the
+      // growing gap every frame; otherwise the gap would inevitably exceed
+      // the tolerance before STABLE_REQUIRED_FRAMES is reached.
+      let sleepStable=false;
+      if(postLandFrames>=MIN_POST_LAND_FRAMES && body.isSleeping){
+        if(state.sleepStableConsecutiveFrames>0){
+          sleepStable=true;
+        }else{
+          const sleepContactInfo=getSleepStableGroundContactInfo(body);
+          if(sleepContactInfo){
+            sleepStable=true;
+            state.sleepStableGroundContactEndSubstep=sleepContactInfo.endSubstep;
+            state.sleepStableGroundContactGapSubsteps=sleepContactInfo.gapSubsteps;
+          }
+        }
+      }
 
       if(postLandFrames>=MIN_POST_LAND_FRAMES && motionStable){
         if(state.stableConsecutiveFrames===0) state.stableFrame=state.frame;
@@ -434,8 +449,6 @@
       if(sleepStable){
         if(state.sleepStableConsecutiveFrames===0){
           state.sleepStableFrame=state.frame;
-          state.sleepStableGroundContactEndSubstep=sleepContactInfo.endSubstep;
-          state.sleepStableGroundContactGapSubsteps=sleepContactInfo.gapSubsteps;
         }
         state.sleepStableConsecutiveFrames++;
       }else{
