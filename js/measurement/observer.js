@@ -1,4 +1,4 @@
-/* v1.39.3 - per-frame measurement observer */
+/* v1.39.4 - per-frame measurement observer */
 (() => {
   'use strict';
   const api={};

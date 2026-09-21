@@ -1,4 +1,4 @@
-/* v1.39.3 - contact diagnostics module (logic unchanged from v1.38.7) */
+/* v1.39.4 - contact diagnostics module (logic unchanged from v1.38.7) */
 (() => {
   'use strict';
   const api = {};
