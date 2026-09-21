@@ -1,8 +1,8 @@
-/* v1.39.0 - measurement modules split / stability behavior unchanged */
+/* v1.39.1 - measurement modules split / stability behavior unchanged */
 (() => {
   'use strict';
 
-  const VERSION = 'v1.39.0';
+  const VERSION = 'v1.39.1';
   const ASSET_PREFIX = 'assets/';
   const MAX_DISCOVERY = 999;
   // v1.38.0: measure each piece until it is stably at rest.
@@ -290,7 +290,7 @@
   }
 
 
-  // v1.39.0: measurement responsibilities are split into dedicated modules.
+  // v1.39.1: measurement responsibilities are split into dedicated modules.
   // The modules receive the existing measurement state/helpers; physics behavior
   // and measurement criteria are intentionally unchanged from v1.38.7.
   const finishPieceModule=window.JinSanMeasurementSummary.create({
@@ -298,16 +298,17 @@
     buildContactLoopRows, responseSummary, summaryHeader
   });
   const validationModule=window.JinSanMeasurementValidation.create({
-    state, csvHeader, colIndex
+    state, csvHeader, parseRows, colIndex
   });
   const exportModule=window.JinSanMeasurementExport.create({
     state, VERSION, $, pad2, num, validationHeader, validationRows:validationModule.validationRows,
-    setupPhysics, clearDynamicBodies, Piece, makeCsvHeader:null
+    summaryHeader, contactEventHeader, contactChangeHeader, contactLoopHeader, frameHeader, selectCompactFrames,
+    setupPhysics, clearDynamicBodies, Piece
   });
   const finishPiece=(...args)=>finishPieceModule.finishPiece(...args);
   const finishRun=(...args)=>exportModule.finishRun(...args);
   const observerModule=window.JinSanMeasurementObserver.create({
-    state, VERSION, Renderer, setStatus, groundContact, contactGeometry, rowFor,
+    state, VERSION, Renderer, Physics, setStatus, groundContact, contactGeometry, rowFor,
     finishPiece, startPiece, finishRun,
     MIN_POST_LAND_FRAMES, STABLE_REQUIRED_FRAMES, MAX_POST_LAND_FRAMES,
     STABLE_VX_THRESHOLD, STABLE_VY_THRESHOLD, STABLE_ANGULAR_VELOCITY_THRESHOLD,
