@@ -1,1 +1,28 @@
-
+{
+  "version": "v1.39.0",
+  "description": "Measurement field dictionary. Calculation logic remains in JavaScript modules.",
+  "categories": {
+    "contact": {
+      "worldX": {"enabled": true,"csv": "landing_contact_world_xy_px","unit": "px","description": "Contact point world X"},
+      "worldY": {"enabled": true,"csv": "landing_contact_world_xy_px","unit": "px","description": "Contact point world Y"},
+      "relativeX": {"enabled": true,"csv": "landing_contact_relative_xy_px","unit": "px","description": "Contact point X relative to COM"},
+      "relativeY": {"enabled": true,"csv": "landing_contact_relative_xy_px","unit": "px","description": "Contact point Y relative to COM"},
+      "torqueProxy": {"enabled": true,"csv": "landing_contact_torque_proxies","unit": "proxy","description": "Contact point torque proxy"},
+      "normalX": {"enabled": true,"csv": "landing_contact_normal_xy","unit": "","description": "Contact normal X"},
+      "normalY": {"enabled": true,"csv": "landing_contact_normal_xy","unit": "","description": "Contact normal Y"},
+      "pointCount": {"enabled": true,"csv": "contact_points","unit": "count","description": "Active contact point count"},
+      "collisionParts": {"enabled": true,"csv": "contact_parts","unit": "count","description": "Collision Part count"}
+    },
+    "kinematics": {
+      "angularVelocity": {"enabled": true,"csv": "angular_velocity","unit": "rad/frame","description": "Body angular velocity"},
+      "omegaCrossRX": {"enabled": true,"csv": "landing_contact_omega_cross_r_px_per_frame","unit": "px/frame","description": "Angular velocity cross relative X"},
+      "omegaCrossRY": {"enabled": true,"csv": "landing_contact_omega_cross_r_px_per_frame","unit": "px/frame","description": "Angular velocity cross relative Y"},
+      "pointVelocityX": {"enabled": true,"csv": "landing_contact_point_velocity_px_per_frame","unit": "px/frame","description": "Contact point velocity X"},
+      "pointVelocityY": {"enabled": true,"csv": "landing_contact_point_velocity_px_per_frame","unit": "px/frame","description": "Contact point velocity Y"},
+      "angularVelocityAfterSolver": {"enabled": true,"csv": "solver_angular_velocity","unit": "rad/frame","description": "Angular velocity immediately after Matter.js Engine.update"},
+      "deltaAngularSolver": {"enabled": true,"csv": "solver_delta_angular_velocity","unit": "rad/frame","description": "Angular velocity change caused by the Matter.js solver step"},
+      "deltaAngularCorrection": {"enabled": true,"csv": "correction_delta_angular_velocity","unit": "rad/frame","description": "Angular velocity change caused by the existing narrow-contact correction"},
+      "deltaAngularTotal": {"enabled": true,"csv": "total_delta_angular_velocity","unit": "rad/frame","description": "Total angular velocity change from pre-step to post-correction"}
+    }
+  }
+}
