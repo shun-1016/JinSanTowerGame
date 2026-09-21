@@ -1,4 +1,4 @@
-/* v1.37.8 - contact-event angular ledger diagnostics */
+/* v1.39.5 - narrow contact threshold experiment */
 const Physics = (() => {
   const {Engine,World,Bodies,Body,Sleeping}=Matter;
 
@@ -35,7 +35,7 @@ const Physics = (() => {
     pieceSleepThreshold:60,
     pieceSlop:0.10,
 
-    narrowContactThresholdPx:8,
+    narrowContactThresholdPx:12,
     contactOffsetThresholdPx:3,
     groundEdgeTolerancePx:2.5,
     maxLandingAngularCorrection:0.70,
