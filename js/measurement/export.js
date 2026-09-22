@@ -1,4 +1,4 @@
-/* v1.39.4 - CSV/ZIP export and completion UI */
+/* CSV/ZIP export and completion UI. */
 (() => {
   'use strict';
   const api={};

@@ -1,4 +1,4 @@
-/* v1.39.4 - per-piece summary and contact aggregation */
+/* Per-piece summary and contact aggregation. */
 (() => {
   'use strict';
   const api={};
