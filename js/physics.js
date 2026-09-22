@@ -1,4 +1,4 @@
-/* v1.39.5 - narrow contact threshold experiment */
+/* v1.39.6 - measurement version source refactor; physics unchanged from v1.39.5 */
 const Physics = (() => {
   const {Engine,World,Bodies,Body,Sleeping}=Matter;
 
