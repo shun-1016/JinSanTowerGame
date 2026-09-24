@@ -54,6 +54,7 @@ const Physics = (() => {
     constraintIterations:PHYSICS_CONFIG.constraintIterations
   });
   let physicsSubstepCounter=0;
+  let substepDiagnosticHook=null;
   engine.gravity.x=PHYSICS_CONFIG.gravityX;
   engine.gravity.y=PHYSICS_CONFIG.gravityY;
   engine.gravity.scale=PHYSICS_CONFIG.gravityScale;
@@ -306,9 +307,6 @@ const Physics = (() => {
   function suppressNarrowLandingTorque(body,beforeAngularVelocity){
     body.plugin=body.plugin||{};
     const info=getGroundContactInfo(body);
-    // Record every evaluation, not only cases where a correction is applied.
-    // This makes v1.33.2 an observation-only extension of v1.33.1: physics
-    // parameters and the correction formula itself are unchanged.
     body.plugin.narrowLandingEvaluated=!!info;
     body.plugin.narrowLandingContactSpan=info?info.span:NaN;
     body.plugin.narrowLandingContactSource=info?info.source:'';
@@ -326,20 +324,15 @@ const Physics = (() => {
     if(info.offset<=PHYSICS_CONFIG.contactOffsetThresholdPx)return;
     const delta=body.angularVelocity-beforeAngularVelocity;
     if(Math.abs(delta)<PHYSICS_CONFIG.minCollisionDeltaAngular)return;
-
     const narrowFactor=clamp01((PHYSICS_CONFIG.narrowContactThresholdPx-info.span)/PHYSICS_CONFIG.narrowContactThresholdPx);
     const offsetFactor=clamp01((info.offset-PHYSICS_CONFIG.contactOffsetThresholdPx)/PHYSICS_CONFIG.contactOffsetScalePx);
     const correction=Math.min(PHYSICS_CONFIG.maxLandingAngularCorrection,narrowFactor*offsetFactor);
     if(correction<=0)return;
-
     const after=beforeAngularVelocity+delta*(1-correction);
     Body.setAngularVelocity(body,after);
     body.plugin.narrowLandingAngularAfter=after;
     body.plugin.narrowLandingCorrection=correction;
     body.plugin.narrowLandingCorrectionApplied=true;
-
-    // Latch the first actual correction event so later substeps cannot overwrite
-    // the evidence before measurement captures the landing frame.
     if(!body.plugin.narrowLandingCorrectionAppliedLatched){
       body.plugin.narrowLandingCorrectionAppliedLatched=true;
       body.plugin.narrowLandingCorrectionLatched=correction;
@@ -353,8 +346,6 @@ const Physics = (() => {
       body.plugin.narrowLandingOffsetConditionLatched=true;
       body.plugin.narrowLandingDeltaConditionLatched=true;
     }
-
-    // Keep the legacy v1.33.1 diagnostic names for compatibility.
     body.plugin.lastNarrowLandingContactSpan=info.span;
     body.plugin.lastNarrowLandingContactSource=info.source;
     body.plugin.lastNarrowLandingContactOffset=info.offset;
@@ -367,21 +358,9 @@ const Physics = (() => {
     const ev=plugin.groundContactEventActive;
     ev.endSubstep=endSubstep===null?physicsSubstepCounter:endSubstep;
     ev.durationSubsteps=Math.max(1,ev.endSubstep-ev.startSubstep+1);
-    // end* is already the last state observed while contact was active. Do not
-    // replace it with the following non-contact substep.
     ev.deltaX=ev.endX-ev.startX; ev.deltaY=ev.endY-ev.startY;
     ev.deltaAngle=ev.endAngle-ev.startAngle; ev.deltaVx=ev.endVx-ev.startVx;
     ev.deltaVy=ev.endVy-ev.startVy; ev.deltaOmega=ev.endOmega-ev.startOmega;
-    // v1.37.8: keep both a direct observed angular ledger and the solver/correction ledger.
-    // observedDeltaAngular telescopes from the first post-contact state to the last active-contact state.
-    // Including-start totals are retained separately so the START substep can be diagnosed explicitly.
-    // Aggregate decomposition is defined from the latched event-start state
-    // (after the START substep) through the last active-contact substep.
-    // The START substep is intentionally excluded because its post-correction
-    // state is the event start state; including START would make the aggregate
-    // no longer match endOmega - startOmega.
-    // The sums satisfy: total = solver + correction (within floating-point error)
-    // and total should match endOmega - startOmega.
     ev.partIds=Array.from(ev.partIds||[]);
     plugin.groundContactEvents=plugin.groundContactEvents||[];
     plugin.groundContactEvents.push(ev);
@@ -392,18 +371,12 @@ const Physics = (() => {
     const totalMs=Math.max(1,Math.min(33,dt*1000)),subDt=totalMs/PHYSICS_CONFIG.subSteps;
     for(let i=0;i<PHYSICS_CONFIG.subSteps;i++){
       const dynamicBodies=world.bodies.filter(b=>!b.isStatic&&b.label==='piece');
-      const before=dynamicBodies.map(body=>({
-        body,
-        omega:body.angularVelocity,
-        vx:body.velocity.x,
-        vy:body.velocity.y,
-        x:body.position.x,
-        y:body.position.y
-      }));
+      const before=dynamicBodies.map(body=>({body,omega:body.angularVelocity,vx:body.velocity.x,vy:body.velocity.y,x:body.position.x,y:body.position.y,angle:body.angle}));
       Engine.update(engine,subDt);
       physicsSubstepCounter++;
       for(const item of before){
-        const angularAfterSolver=item.body.angularVelocity;
+        const afterSolverState={x:item.body.position.x,y:item.body.position.y,angle:item.body.angle,vx:item.body.velocity.x,vy:item.body.velocity.y,omega:item.body.angularVelocity};
+        const angularAfterSolver=afterSolverState.omega;
         const deltaAngularSolver=angularAfterSolver-item.omega;
         suppressNarrowLandingTorque(item.body,item.omega);
         const angularAfterCorrection=item.body.angularVelocity;
@@ -418,121 +391,30 @@ const Physics = (() => {
         item.body.plugin.deltaAngularTotal=deltaAngularTotal;
         const info=getGroundContactInfo(item.body);
         const plugin=item.body.plugin=item.body.plugin||{};
+        let response=null;
         if(info){
           const deltaVx=item.body.velocity.x-item.vx;
           const deltaVy=item.body.velocity.y-item.vy;
           const deltaOmega=item.body.angularVelocity-item.omega;
-          const response=getGroundCollisionResponse(item.body,deltaVx,deltaVy,deltaOmega,deltaAngularSolver);
-          const event={
-            substep:physicsSubstepCounter,
-            vxBefore:item.vx,vxAfter:item.body.velocity.x,deltaVx,
-            vyBefore:item.vy,vyAfter:item.body.velocity.y,deltaVy,
-            angularBefore:item.omega,angularAfter:item.body.angularVelocity,deltaAngular:deltaOmega,
-            angularAfterSolver,deltaAngularSolver,angularAfterCorrection,deltaAngularCorrection,deltaAngularTotal,
-            xBefore:item.x,xAfter:item.body.position.x,deltaX:item.body.position.x-item.x,
-            yBefore:item.y,yAfter:item.body.position.y,deltaY:item.body.position.y-item.y,
-            contactWidth:info.span,contactOffset:info.offset,contactSource:info.source,
-            partIds:info.partIds||[],response:response||null
-          };
-          if(!plugin.firstGroundContactEventLatched){
-            plugin.firstGroundContactEventLatched=true;
-            plugin.firstGroundContactEvent=event;
-          }
-          if(!plugin.maxGroundDeltaVxEventLatched || Math.abs(deltaVx)>Math.abs(plugin.maxGroundDeltaVxEventLatched.deltaVx)){
-            plugin.maxGroundDeltaVxEventLatched=event;
-          }
-
+          response=getGroundCollisionResponse(item.body,deltaVx,deltaVy,deltaOmega,deltaAngularSolver);
+          const event={substep:physicsSubstepCounter,vxBefore:item.vx,vxAfter:item.body.velocity.x,deltaVx,vyBefore:item.vy,vyAfter:item.body.velocity.y,deltaVy,angularBefore:item.omega,angularAfter:item.body.angularVelocity,deltaAngular:deltaOmega,angularAfterSolver,deltaAngularSolver,angularAfterCorrection,deltaAngularCorrection,deltaAngularTotal,xBefore:item.x,xAfter:item.body.position.x,deltaX:item.body.position.x-item.x,yBefore:item.y,yAfter:item.body.position.y,deltaY:item.body.position.y-item.y,contactWidth:info.span,contactOffset:info.offset,contactSource:info.source,partIds:info.partIds||[],response:response||null};
+          if(!plugin.firstGroundContactEventLatched){plugin.firstGroundContactEventLatched=true;plugin.firstGroundContactEvent=event;}
+          if(!plugin.maxGroundDeltaVxEventLatched||Math.abs(deltaVx)>Math.abs(plugin.maxGroundDeltaVxEventLatched.deltaVx))plugin.maxGroundDeltaVxEventLatched=event;
           if(!plugin.groundContactEventActive){
-            plugin.groundContactEventActive={
-              startSubstep:physicsSubstepCounter,endSubstep:physicsSubstepCounter,durationSubsteps:1,
-              startX:item.body.position.x,startY:item.body.position.y,startAngle:item.body.angle,
-              startVx:item.body.velocity.x,startVy:item.body.velocity.y,startOmega:item.body.angularVelocity,
-              endX:item.body.position.x,endY:item.body.position.y,endAngle:item.body.angle,
-              endVx:item.body.velocity.x,endVy:item.body.velocity.y,endOmega:item.body.angularVelocity,
-              deltaX:0,deltaY:0,deltaAngle:0,deltaVx:0,deltaVy:0,deltaOmega:0,
-              minWidth:info.span,maxWidth:info.span,maxOffset:info.offset,maxAbsDvx:Math.abs(deltaVx),
-              maxDvx:deltaVx,maxDvxSubstep:physicsSubstepCounter,maxDvxWidth:info.span,maxDvxOffset:info.offset,
-              maxDvxVn:response?response.deltaVn:NaN,maxDvxVt:response?response.deltaVt:NaN,
-              maxAbsDomega:Math.abs(deltaOmega),maxDomega:deltaOmega,maxDomegaSubstep:physicsSubstepCounter,
-              sumSolverDeltaAngular:0,sumCorrectionDeltaAngular:0,sumTotalDeltaAngular:0,
-              startPreOmega:item.omega,startSolverDeltaAngular:deltaAngularSolver,startCorrectionDeltaAngular:deltaAngularCorrection,startTotalDeltaAngular:deltaAngularTotal,
-              sumSolverDeltaAngularIncludingStart:deltaAngularSolver,sumCorrectionDeltaAngularIncludingStart:deltaAngularCorrection,sumTotalDeltaAngularIncludingStart:deltaAngularTotal,
-              observedDeltaAngular:0,lastObservedOmega:item.body.angularVelocity,
-              maxAbsDvt:response?Math.abs(response.deltaVt):0,totalAbsDvx:Math.abs(deltaVx),
-              partIds:new Set(info.partIds||[]),
-              lastPartKey:(info.partIds||[]).slice().sort((a,b)=>a-b).join(';'),
-              lastWidth:info.span,lastOffset:info.offset,
-              changePoints:[{
-                substep:physicsSubstepCounter,reason:'START',
-                partIds:(info.partIds||[]).slice().sort((a,b)=>a-b),
-                contactWidth:info.span,contactOffset:info.offset,
-                vxBefore:item.vx,vxAfter:item.body.velocity.x,deltaVx,
-                vyBefore:item.vy,vyAfter:item.body.velocity.y,deltaVy,
-                angularBefore:item.omega,angularAfter:item.body.angularVelocity,deltaAngular:deltaOmega,
-                solverDeltaAngular:deltaAngularSolver,correctionDeltaAngular:deltaAngularCorrection,totalDeltaAngular:deltaAngularTotal,
-                deltaVn:response?response.deltaVn:NaN,deltaVt:response?response.deltaVt:NaN,
-                x:item.body.position.x,angle:item.body.angle,cumulativeDeltaX:0,cumulativeDeltaAngle:0,
-                contactPoints:response?response.contactCount:0,supportCount:response?response.supportCount:0
-              }]
-            };
+            plugin.groundContactEventActive={startSubstep:physicsSubstepCounter,endSubstep:physicsSubstepCounter,durationSubsteps:1,startX:item.body.position.x,startY:item.body.position.y,startAngle:item.body.angle,startVx:item.body.velocity.x,startVy:item.body.velocity.y,startOmega:item.body.angularVelocity,endX:item.body.position.x,endY:item.body.position.y,endAngle:item.body.angle,endVx:item.body.velocity.x,endVy:item.body.velocity.y,endOmega:item.body.angularVelocity,deltaX:0,deltaY:0,deltaAngle:0,deltaVx:0,deltaVy:0,deltaOmega:0,minWidth:info.span,maxWidth:info.span,maxOffset:info.offset,maxAbsDvx:Math.abs(deltaVx),maxDvx:deltaVx,maxDvxSubstep:physicsSubstepCounter,maxDvxWidth:info.span,maxDvxOffset:info.offset,maxDvxVn:response?response.deltaVn:NaN,maxDvxVt:response?response.deltaVt:NaN,maxAbsDomega:Math.abs(deltaOmega),maxDomega:deltaOmega,maxDomegaSubstep:physicsSubstepCounter,sumSolverDeltaAngular:0,sumCorrectionDeltaAngular:0,sumTotalDeltaAngular:0,startPreOmega:item.omega,startSolverDeltaAngular:deltaAngularSolver,startCorrectionDeltaAngular:deltaAngularCorrection,startTotalDeltaAngular:deltaAngularTotal,sumSolverDeltaAngularIncludingStart:deltaAngularSolver,sumCorrectionDeltaAngularIncludingStart:deltaAngularCorrection,sumTotalDeltaAngularIncludingStart:deltaAngularTotal,observedDeltaAngular:0,lastObservedOmega:item.body.angularVelocity,maxAbsDvt:response?Math.abs(response.deltaVt):0,totalAbsDvx:Math.abs(deltaVx),partIds:new Set(info.partIds||[]),lastPartKey:(info.partIds||[]).slice().sort((a,b)=>a-b).join(';'),lastWidth:info.span,lastOffset:info.offset,changePoints:[{substep:physicsSubstepCounter,reason:'START',partIds:(info.partIds||[]).slice().sort((a,b)=>a-b),contactWidth:info.span,contactOffset:info.offset,vxBefore:item.vx,vxAfter:item.body.velocity.x,deltaVx,vyBefore:item.vy,vyAfter:item.body.velocity.y,deltaVy,angularBefore:item.omega,angularAfter:item.body.angularVelocity,deltaAngular:deltaOmega,solverDeltaAngular:deltaAngularSolver,correctionDeltaAngular:deltaAngularCorrection,totalDeltaAngular:deltaAngularTotal,deltaVn:response?response.deltaVn:NaN,deltaVt:response?response.deltaVt:NaN,x:item.body.position.x,angle:item.body.angle,cumulativeDeltaX:0,cumulativeDeltaAngle:0,contactPoints:response?response.contactCount:0,supportCount:response?response.supportCount:0}]};
           }else{
-            const ev=plugin.groundContactEventActive;
-            ev.endSubstep=physicsSubstepCounter; ev.durationSubsteps++;
-            ev.endX=item.body.position.x; ev.endY=item.body.position.y; ev.endAngle=item.body.angle;
-            ev.endVx=item.body.velocity.x; ev.endVy=item.body.velocity.y; ev.endOmega=item.body.angularVelocity;
-            ev.sumSolverDeltaAngular+=deltaAngularSolver;
-            ev.sumCorrectionDeltaAngular+=deltaAngularCorrection;
-            ev.sumTotalDeltaAngular+=deltaAngularTotal;
-            ev.sumSolverDeltaAngularIncludingStart+=deltaAngularSolver;
-            ev.sumCorrectionDeltaAngularIncludingStart+=deltaAngularCorrection;
-            ev.sumTotalDeltaAngularIncludingStart+=deltaAngularTotal;
-            const observedDeltaAngular=item.body.angularVelocity-ev.lastObservedOmega;
-            ev.observedDeltaAngular+=observedDeltaAngular;
-            ev.lastObservedOmega=item.body.angularVelocity;
-            ev.minWidth=Math.min(ev.minWidth,info.span); ev.maxWidth=Math.max(ev.maxWidth,info.span);
-            ev.maxOffset=Math.max(ev.maxOffset,info.offset); ev.maxAbsDvx=Math.max(ev.maxAbsDvx,Math.abs(deltaVx));
-            ev.totalAbsDvx+=Math.abs(deltaVx);
-            const dvt=response?response.deltaVt:NaN; if(Number.isFinite(dvt)){ev.maxAbsDvt=Math.max(ev.maxAbsDvt,Math.abs(dvt));}
-            if(Math.abs(deltaVx)>Math.abs(ev.maxDvx)){
-              ev.maxDvx=deltaVx;ev.maxDvxSubstep=physicsSubstepCounter;ev.maxDvxWidth=info.span;ev.maxDvxOffset=info.offset;
-              ev.maxDvxVn=response?response.deltaVn:NaN;ev.maxDvxVt=dvt;
-            }
-            if(Math.abs(deltaOmega)>Math.abs(ev.maxAbsDomega)){ev.maxAbsDomega=Math.abs(deltaOmega);ev.maxDomega=deltaOmega;ev.maxDomegaSubstep=physicsSubstepCounter;}
-            for(const id of (info.partIds||[]))ev.partIds.add(id);
-
-            const partKey=(info.partIds||[]).slice().sort((a,b)=>a-b).join(';');
-            const partChanged=partKey!==ev.lastPartKey;
-            const widthChanged=Math.abs(info.span-ev.lastWidth)>=1.0;
-            const offsetChanged=Math.abs(info.offset-ev.lastOffset)>=2.0;
-            const responseNotable=Math.abs(deltaVx)>=PHYSICS_CONFIG.contactChangeDeltaVxThreshold || Math.abs(deltaOmega)>=PHYSICS_CONFIG.contactChangeDeltaOmegaThreshold || (response&&Math.abs(response.deltaVt)>=PHYSICS_CONFIG.contactChangeDeltaVtThreshold);
-            if(partChanged||widthChanged||offsetChanged||responseNotable){
-              const reason=[];
-              if(partChanged)reason.push('PART_CHANGE');
-              if(widthChanged)reason.push('WIDTH_CHANGE');
-              if(offsetChanged)reason.push('OFFSET_CHANGE');
-              if(responseNotable)reason.push('RESPONSE');
-              ev.changePoints.push({
-                substep:physicsSubstepCounter,reason:reason.join('+'),
-                partIds:(info.partIds||[]).slice().sort((a,b)=>a-b),
-                contactWidth:info.span,contactOffset:info.offset,
-                vxBefore:item.vx,vxAfter:item.body.velocity.x,deltaVx,
-                vyBefore:item.vy,vyAfter:item.body.velocity.y,deltaVy,
-                angularBefore:item.omega,angularAfter:item.body.angularVelocity,deltaAngular:deltaOmega,
-                solverDeltaAngular:deltaAngularSolver,correctionDeltaAngular:deltaAngularCorrection,totalDeltaAngular:deltaAngularTotal,
-                deltaVn:response?response.deltaVn:NaN,deltaVt:response?response.deltaVt:NaN,
-                x:item.body.position.x,angle:item.body.angle,
-                cumulativeDeltaX:item.body.position.x-ev.startX,
-                cumulativeDeltaAngle:item.body.angle-ev.startAngle,
-                contactPoints:response?response.contactCount:0,supportCount:response?response.supportCount:0
-              });
-            }
-            ev.lastPartKey=partKey;ev.lastWidth=info.span;ev.lastOffset=info.offset;
+            const ev=plugin.groundContactEventActive;ev.endSubstep=physicsSubstepCounter;ev.durationSubsteps++;ev.endX=item.body.position.x;ev.endY=item.body.position.y;ev.endAngle=item.body.angle;ev.endVx=item.body.velocity.x;ev.endVy=item.body.velocity.y;ev.endOmega=item.body.angularVelocity;ev.sumSolverDeltaAngular+=deltaAngularSolver;ev.sumCorrectionDeltaAngular+=deltaAngularCorrection;ev.sumTotalDeltaAngular+=deltaAngularTotal;ev.sumSolverDeltaAngularIncludingStart+=deltaAngularSolver;ev.sumCorrectionDeltaAngularIncludingStart+=deltaAngularCorrection;ev.sumTotalDeltaAngularIncludingStart+=deltaAngularTotal;const observedDeltaAngular=item.body.angularVelocity-ev.lastObservedOmega;ev.observedDeltaAngular+=observedDeltaAngular;ev.lastObservedOmega=item.body.angularVelocity;ev.minWidth=Math.min(ev.minWidth,info.span);ev.maxWidth=Math.max(ev.maxWidth,info.span);ev.maxOffset=Math.max(ev.maxOffset,info.offset);ev.maxAbsDvx=Math.max(ev.maxAbsDvx,Math.abs(deltaVx));ev.totalAbsDvx+=Math.abs(deltaVx);const dvt=response?response.deltaVt:NaN;if(Number.isFinite(dvt))ev.maxAbsDvt=Math.max(ev.maxAbsDvt,Math.abs(dvt));if(Math.abs(deltaVx)>Math.abs(ev.maxDvx)){ev.maxDvx=deltaVx;ev.maxDvxSubstep=physicsSubstepCounter;ev.maxDvxWidth=info.span;ev.maxDvxOffset=info.offset;ev.maxDvxVn=response?response.deltaVn:NaN;ev.maxDvxVt=dvt;}if(Math.abs(deltaOmega)>Math.abs(ev.maxAbsDomega)){ev.maxAbsDomega=Math.abs(deltaOmega);ev.maxDomega=deltaOmega;ev.maxDomegaSubstep=physicsSubstepCounter;}for(const id of (info.partIds||[]))ev.partIds.add(id);
+            const partKey=(info.partIds||[]).slice().sort((a,b)=>a-b).join(';');const partChanged=partKey!==ev.lastPartKey;const widthChanged=Math.abs(info.span-ev.lastWidth)>=1.0;const offsetChanged=Math.abs(info.offset-ev.lastOffset)>=2.0;const responseNotable=Math.abs(deltaVx)>=PHYSICS_CONFIG.contactChangeDeltaVxThreshold||Math.abs(deltaOmega)>=PHYSICS_CONFIG.contactChangeDeltaOmegaThreshold||(response&&Math.abs(response.deltaVt)>=PHYSICS_CONFIG.contactChangeDeltaVtThreshold);if(partChanged||widthChanged||offsetChanged||responseNotable){const reason=[];if(partChanged)reason.push('PART_CHANGE');if(widthChanged)reason.push('WIDTH_CHANGE');if(offsetChanged)reason.push('OFFSET_CHANGE');if(responseNotable)reason.push('RESPONSE');ev.changePoints.push({substep:physicsSubstepCounter,reason:reason.join('+'),partIds:(info.partIds||[]).slice().sort((a,b)=>a-b),contactWidth:info.span,contactOffset:info.offset,vxBefore:item.vx,vxAfter:item.body.velocity.x,deltaVx,vyBefore:item.vy,vyAfter:item.body.velocity.y,deltaVy,angularBefore:item.omega,angularAfter:item.body.angularVelocity,deltaAngular:deltaOmega,solverDeltaAngular:deltaAngularSolver,correctionDeltaAngular:deltaAngularCorrection,totalDeltaAngular:deltaAngularTotal,deltaVn:response?response.deltaVn:NaN,deltaVt:response?response.deltaVt:NaN,x:item.body.position.x,angle:item.body.angle,cumulativeDeltaX:item.body.position.x-ev.startX,cumulativeDeltaAngle:item.body.angle-ev.startAngle,contactPoints:response?response.contactCount:0,supportCount:response?response.supportCount:0});}ev.lastPartKey=partKey;ev.lastWidth=info.span;ev.lastOffset=info.offset;
           }
-        }else if(plugin.groundContactEventActive){
-          finalizeGroundContactHistory(item.body,physicsSubstepCounter-1);
+        }else if(plugin.groundContactEventActive){finalizeGroundContactHistory(item.body,physicsSubstepCounter-1);}
+        if(typeof substepDiagnosticHook==='function'){
+          try{
+            substepDiagnosticHook({substep:physicsSubstepCounter,body:item.body,before:{x:item.x,y:item.y,angle:item.angle,vx:item.vx,vy:item.vy,omega:item.omega},after:{x:item.body.position.x,y:item.body.position.y,angle:item.body.angle,vx:item.body.velocity.x,vy:item.body.velocity.y,omega:item.body.angularVelocity},afterSolver:afterSolverState,delta:{vx:item.body.velocity.x-item.vx,vy:item.body.velocity.y-item.vy,omega:item.body.angularVelocity-item.omega},deltaSolver:{omega:deltaAngularSolver},deltaCorrection:{omega:deltaAngularCorrection},info:info?{span:info.span,offset:info.offset,source:info.source,partIds:info.partIds||[]}:null,response:response});
+          }catch(e){console.warn('[physics] substep diagnostic hook failed',e);}
         }
       }
     }
   }
-  return {engine,world,setup,createPieceBody,add,hold,release,move,rotate,step,finalizeGroundContactHistory};
+  function setSubstepDiagnosticHook(hook){substepDiagnosticHook=typeof hook==='function'?hook:null;}
+  return {engine,world,setup,createPieceBody,add,hold,release,move,rotate,step,finalizeGroundContactHistory,setSubstepDiagnosticHook};
 })();
