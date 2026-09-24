@@ -1,169 +1,492 @@
 # JinSan Tower Game
 
-## v23.5
-v23.5はv23.4.1をベースに、**物理パラメータ・ピース形状生成・通常ゲームの挙動を変更せず**、物理挙動デバッグの自動計測出力方式を整理したバージョンです。
+ブラウザゲーム「仁さんタワーゲーム」の開発用READMEです。
 
-### v23.5 デバッグ計測
-`?debug=on` でゲームモード選択画面に「物理挙動デバッグ」が表示されます。
+## 現在の開発版
 
-- 「全ピース自動計測」1ボタンで、検出された全ピースを順番に計測
-- 画像フォルダ内の連番ピースを自動検出し、ピース追加時も対象数を自動増加
-- 全ピースを同じ初期位置・初期角度・初速0で計測
-- 落下開始から接地を検出
-- 接地後60フレームまで継続記録
-- 位置、速度、角速度、角度、Sleep状態、接地状態をフレーム単位で記録
-- 質量、慣性、重心ズレ、従来の底面幅、縦横比、物理パーツ数、三角形数、領域数、輪郭頂点数も記録
-- 最下端から1/2/4/8px以内の物理頂点幅を記録
-- 実際の地面接触点の幅、接触点数、接触パーツ数、接触中心のズレを記録
-- 計測完了後、**ピースごとのCSVを1つのZIPにまとめて自動出力**
-- ZIP内は `01.csv`, `02.csv` ... のようにピース単位で分割
-- 画面上には計測後の「計測ZIPを保存」リンクも表示
+**v1.39.8**
 
-### 出力ファイル
-ZIPファイル名は `JinSanTowerGame_v23.5_physics_logs_YYYYMMDDHHMMSS.zip` の形式です。
-ZIP内の各CSVはUTF-8 BOM付きで、Excel等で開いた際に日本語を含む環境でも扱いやすい形式です。
+- ブランチ: `develop`
+- `main`: 安定版
+- 開発・物理検証は `develop` で実施
+- Matter.js: `0.20.0`
+- フロントエンド: HTML / CSS / JavaScript
+- バックエンド・DB: なし
+- Vercel Preview: `https://jin-san-tower-game.vercel.app/?debug=on`
 
-### 通常ゲーム
-v23.5では、物理パラメータ、ピース形状生成、通常モード、エンドレスモード、ゲームオーバー判定などの既存挙動を変更していません。
+v1.39.8は、物理パラメータや通常ゲームの挙動を変更せず、**Matter.jsのsubstep直後の状態を直接取得する診断処理へ切り替えるバージョン**です。
 
-## v23.5 修正内容
-- v23.4.1の計測グループUIを廃止。
-- 「全ピース自動計測」1ボタンに統一し、モーダルの肥大化を解消。
-- 計測対象を全ピースへ変更。
-- 計測データをピース番号ごとのCSVへ分割。
-- 外部ライブラリを追加せず、ゲーム内のデバッグロジックだけでZIPを生成。
-- ZIP 1ファイルとして自動ダウンロードし、必要に応じて画面から再保存可能。
-- 物理計測項目、Matter.js 0.20.0の接触点取得ロジック、物理パラメータは変更なし。
+## 1. リポジトリ運用
 
-## v1.38.0
+### ブランチ
 
-- `contact_events.csv` のイベントレベル Solver / Correction / Total 集計ロジックを修正。
-- イベント開始値は最初の接触substepの **Engine.update + 補正後** の状態であるため、そのSTART substepの角速度変化をイベント集計から除外し、イベント開始状態から終了状態までのsubstepだけを累積する方式に変更。
-- これにより `total_delta_angular_velocity` は `end_angular_velocity - start_angular_velocity` と一致することを期待する。
-- `decomposition_residual` と `decomposition_consistent` を追加し、イベント集計の整合性を機械的に確認できるようにした。
-- `solver + correction = total` の関係も維持する。
-- Matter.jsの物理パラメータ、狭接触角速度補正の式・条件、接触判定・イベント分類ロジックは変更しない。
-- 診断ロジックのみの修正。
+- `main`: 安定版
+- `develop`: 開発・検証用
 
-## v1.37.6
+基本的な運用は、ChatGPTで完全差し替えファイルを作成 → ユーザーが内容を確認 → ユーザーがGitHubへコミット、です。
 
-- v1.37.5で `contact_changes` に記録される solver / correction / total の分解値を、`contact_events` のイベント集計値にも正しく反映。
-- `contact_events.csv` の3列は、各イベント中の全接触substepにおける `solverDeltaAngular` / `correctionDeltaAngular` / `totalDeltaAngular` の累積値を出力。
-- `total_delta_angular_velocity` は `solver_delta_angular_velocity + correction_delta_angular_velocity` と一致することを確認できる診断値。
-- Matter.js の物理パラメータ、narrow-contact correction の計算式・適用条件、接触判定・イベント分類は変更しない。
-- 診断のみの修正。`docs/` は変更しない。
+### `docs/`
 
-## v1.37.5
+`docs/` はGitHub Actionsやログアップロード手順などの運用資料を置く領域です。
+物理検証用コード変更では原則として変更しません。
 
-### 目的
-v1.37.4で追加したsolver/correction角速度分離診断について、`contact_changes.csv` のchange-point行にも同じ分解値を記録できるようにします。あわせて `contact_events.csv` では接触イベント全体について各substepのsolver/correction/total角速度変化を積算して記録します。
+### ログ
 
-### 追加・修正した診断
-- `contact_changes_*.csv` の各change-pointに以下を記録
-  - `solver_delta_angular_velocity`：そのsubstepのMatter.jsソルバによる角速度変化
-  - `correction_delta_angular_velocity`：そのsubstepの既存の狭接触角速度補正による角速度変化
-  - `total_delta_angular_velocity`：そのsubstepの更新前から補正後までの角速度変化
-- `contact_events_*.csv` では接触イベント中の各substepについて上記3値を積算し、イベント全体の分解値として記録
-- `total = solver + correction` の関係を維持する診断値として出力
+自動計測結果はiPhoneショートカットからGitHubの `develop/log/<version>/runN.zip` に保存します。
+既存のアップロードワークフローは再作成しません。
 
-### 物理挙動
-- Matter.jsの物理パラメータは変更しません。
-- 狭接触角速度補正の計算式・適用条件は変更しません。
-- 接触判定、イベント分類、change-point抽出条件は変更しません。
-- 計測・診断情報のみ変更します。
-- `docs/` は変更しません。
+---
 
-## v1.37.4
+## 2. 通常ゲーム
 
-### 目的
-v1.37.3までのログでは、接触時の角速度変化について「Matter.jsのソルバによる変化」と「ゲーム側の狭接触角速度補正による変化」を直接分離できませんでした。v1.37.4では**物理挙動を変更せず、診断情報のみ追加**します。
+ゲーム本体はHTML / CSS / JavaScriptで構成されています。
 
-### 追加した角速度診断
-各Physics substepで以下を記録します。
-- `pre_angular_velocity`：Matter.js更新前の角速度
-- `solver_angular_velocity`：`Engine.update()`直後の角速度
-- `solver_delta_angular_velocity`：ソルバによる角速度変化
-- `correction_delta_angular_velocity`：狭接触補正による角速度変化
-- `total_delta_angular_velocity`：更新前から最終状態までの角速度変化
+主なファイル:
 
-これにより、接触時の角速度変化を「Matter.jsソルバ」「既存の狭接触補正」「合計」に分離して確認できます。
+```text
+index.html
+style.css
+js/
+├─ physics.js
+├─ piece.js
+├─ renderer.js
+├─ input.js
+├─ game.js
+├─ main.js
+└─ physics-stabilization.js
+```
 
-### 物理挙動
-- Matter.jsの物理パラメータは変更しません。
-- 狭接触角速度補正の計算式・適用条件も変更しません。
-- 計測・診断情報のみ追加します。
-- `docs/` は変更しません。
+画像素材は `assets/` に配置します。
 
-## v1.37.3
+ピースは画像フォルダから連番で自動検出します。現在の計測対象は37ピースですが、今後のピース追加を前提としているため、**37という数を検証ロジックへハードコードしません**。
 
-### ファイル配置
-- `index.html`：ルート
-- `README.md`：ルート
-- `js/measurement.js`
-- `js/measurement-contact.js`
-- `js/measurement-config.json`
-- `js/physics.js`
+---
 
-`docs/` はデバッグログのアップロード手順やGitHub Actions関連のREADMEを配置する運用のため、v1.37.3では変更しません。
+## 3. 物理計測モジュール
 
-### リファクタリング
-- 接触診断処理を `measurement-contact.js` に分離
-- 計測項目を `measurement-config.json` に辞書化
-- 接触点X/Y、COM相対座標、接触法線、トルクproxy、接触点数、Collision Part等を整理
-- 狭接触時角速度補正本体は維持
-- `?narrowCorrection=on/off` のURL切替は削除
+現在の計測コードは以下の構成です。
 
-`measurement-contact.js` は `measurement.js` より先に読み込みます。
+```text
+js/
+├─ measurement.js
+└─ measurement/
+   ├─ contact.js
+   ├─ config.json
+   ├─ observer.js
+   ├─ summary.js
+   ├─ validation.js
+   ├─ export.js
+   ├─ version.js
+   └─ substep.js
+```
+
+### 各ファイルの役割
+
+- `measurement.js`
+  - 自動計測全体の開始・終了
+  - ピース切り替え
+  - 計測状態管理
+  - 計測モジュール間の接続
+- `measurement/contact.js`
+  - 地面接触判定
+  - 接触点・接触Part・接触幅・接触中心などの取得
+- `measurement/observer.js`
+  - フレーム単位の状態観測
+  - 着地判定
+  - 安定判定
+  - Sleep後の地面接触履歴を利用した安定判定
+- `measurement/summary.js`
+  - ピース単位のsummary生成
+  - contact event / contact change / contact loopの集約
+- `measurement/validation.js`
+  - `validation.csv` の生成
+  - ピースごとの計測完了状態を検証
+- `measurement/export.js`
+  - CSV生成
+  - ZIP生成
+  - iPhoneでの保存・共有
+- `measurement/version.js`
+  - 計測バージョンの唯一の定義元
+- `measurement/substep.js`
+  - v1.39.8で追加したsubstep診断
+
+---
+
+## 4. 自動計測条件
+
+`?debug=on` でゲームモード画面に「物理挙動デバッグ」が表示されます。
+
+「全ピース自動計測」を実行すると、検出されたピースを1つずつ同じ条件で計測します。
+
+- 初期位置・初期角度を統一
+- 初速・初期角速度を0に設定
+- 各ピース単独で計測
+- ピース同士の接触なし
+- 自動計測では側壁なし
+- 落下から地面接触、安定まで記録
+- 現在の計測対象数に依存しない動的検出
+
+### 計測終了条件
+
+現在の値:
+
+- `MIN_POST_LAND_FRAMES = 30`
+- `STABLE_REQUIRED_FRAMES = 20`
+- `MAX_POST_LAND_FRAMES = 600`
+- 線速度安定閾値: `0.01`
+- 角速度安定閾値: `0.01`
+- Matter.js substep数: `4`
+
+着地後30フレーム以上経過した状態で、地面接触かつSleepまたは低速度状態が20フレーム連続すると `stable_confirmed` とします。
+
+Sleep中はMatter.jsの仕様上、地面とのactive pairが消える場合があるため、直前の地面接触履歴を利用した `SLEEP_AFTER_GROUND_CONTACT` も使用します。
+
+600フレームに到達した場合は安全弁として計測を終了し、安定確認できていなければ `max_post_land_timeout` とします。
+
+これらは計測終了条件であり、Matter.jsの物理パラメータそのものではありません。
+
+---
+
+## 5. 現在の物理パラメータ
+
+v1.39.8でも以下を変更していません。
+
+```text
+subSteps                     4
+positionIterations          12
+velocityIterations           8
+constraintIterations         2
+gravityX                     0
+gravityY                     1
+gravityScale                 0.001
+
+groundFriction               0.85
+groundFrictionStatic          1
+groundRestitution             0
+pieceFriction                 0.35
+pieceFrictionStatic           0.45
+pieceFrictionAir              0.015
+pieceRestitution              0
+pieceDensity                  0.002
+pieceSleepThreshold          60
+pieceSlop                     0.10
+
+narrowContactThresholdPx     12
+contactOffsetThresholdPx     3
+groundEdgeTolerancePx         2.5
+maxLandingAngularCorrection  0.70
+minCollisionDeltaAngular     0.02
+contactOffsetScalePx        12
+```
+
+特に `narrowContactThresholdPx` はv1.39.5で8pxから12pxへ変更し、v1.39.6でも12pxを維持しています。
+
+v1.39.8ではこの値を変更しません。
+
+---
+
+## 6. 物理形状とCompound Body
+
+ピース画像の透過領域から衝突形状を生成します。
+
+- 画像の不透明領域を解析
+- 領域を三角形分割
+- 凸形状を組み合わせてCompound Bodyを生成
+- 現在の `COMPOUND_MODE` は `intermediate`
+- 透明領域を埋めるような衝突形状は作らない方針
+
+1つのピースが複数のMatter.js Collision Partを持つことがあります。
+
+そのため、同じピースでも接触時に
+
+- 接触Part数
+- 接触点数
+- support数
+- 接触幅
+- 接触中心位置
+
+などの接触マニホールドが変わる可能性があります。
+
+---
+
+## 7. 既存の接触・角速度診断
+
+現在の計測ZIPには主に以下が含まれます。
+
+- `metadata.csv`
+- `validation.csv`
+- `summary_*.csv`
+- `contact_events_*.csv`
+- `contact_changes_*.csv`
+- `contact_loops_*.csv`
+- `frames_*.csv`
+- `substeps.csv`（v1.39.8）
+
+### `contact_events`
+
+連続した地面接触区間を1イベントとして記録します。
+
+Matter.js Solverによる角速度変化と、既存のnarrow-contact correctionによる角速度変化を分離します。
+
+```text
+solver_delta_angular_velocity
+correction_delta_angular_velocity
+total_delta_angular_velocity
+```
+
+### `contact_loops`
 
 
-## v1.38.0 measurement termination
-- Each piece is measured until a stable-at-rest condition is continuously satisfied.
-- Minimum post-landing measurement: 60 frames.
-- Stability condition: ground contact plus sleeping or low linear/angular velocity.
-- Stability must persist for 30 frames, followed by 30 additional post-stability frames.
-- Maximum post-landing measurement: 600 frames.
-- These rules affect measurement termination only; Matter.js physics parameters and physics behavior are unchanged.
+```text
+contact
+→ separation
+→ free flight
+→ re-contact
+```
 
+という再接触をイベント単位で抽出します。
 
-## v1.38.2
+主な分類:
 
-- 計測完了時のZIP自動ダウンロードを廃止し、「計測ZIPを保存」リンクをユーザー操作で保存する方式に変更。
-- iPhoneの「ZIPを共有（iPhone）」は維持。
-- 着地後の最低計測を60フレームから30フレームへ短縮。
-- 静止条件の連続確認を30フレームから20フレームへ短縮。
-- 静止確認後の追加30フレーム計測を廃止し、20フレーム連続安定を確認した時点で計測終了。
-- 最大着地後計測600フレームは安全弁として維持。
-- `validation.csv` の静止・終了情報をピースごとに保存し、全37ピース終了後も各ピースの実績を正しく出力するよう修正。
-- `summary_*.csv` の `post_stable_frames` を `stable_confirmation_frames` に変更し、安定確認に使用した連続フレーム数を記録。
-- Matter.jsの物理パラメータ、狭接触角速度補正、接触判定・イベント診断ロジックは変更しない。
+- `ANGULAR_RECONTACT_LOOP`
+- `MIXED_RECONTACT_LOOP`
+- `LINEAR_RECONTACT_LOOP`
+- `RECONTACT`
 
+`ANGULAR_RECONTACT_LOOP` は「暴れること」を直接意味する分類ではありません。接触イベント間で角速度が維持され、前イベントに一定以上の角速度変化があった場合の分類です。
 
-### v1.38.2
-- ZIP保存UIを計測完了処理から独立した画面下部パネルとして表示。
-- ZIP生成前に完了パネルを表示し、ZIP生成・メタデータ生成で例外が発生した場合もエラーを画面表示。
-- 自動ダウンロードは使用しない。
-- 物理パラメータ、物理計算、静止判定条件は変更なし。
+---
 
+## 8. これまでに確認できた物理的な傾向
 
-## v1.38.4
+### v1.39.4 run1
 
-v1.38.2をベースに、**物理挙動・安定判定・計測データの意味は変更せず**、計測完了後のZIP生成失敗を特定するための診断を追加したバージョンです。
+- 37/37: `stable_confirmed`
+- 37/37: `row_count_ok`
+- 37/37: `landing_present`
+- 37/37: stable confirmation 20 frames
+- timeout: 0
+- raw rows: 5543
+- contact events: 75
+- contact loops: 38
+- `ANGULAR_RECONTACT_LOOP`: 14
+- `MIXED_RECONTACT_LOOP`: 15
+- `RECONTACT`: 9
 
-### v1.38.4 変更点
-- ZIP生成処理を段階ごとに記録し、失敗時に「発生箇所」を画面へ表示。
-- ファイル数、CSV文字数、主要な計測データ件数を失敗情報として表示。
-- ZIP生成に失敗した場合でも、小さな `export_error.txt` を保存できる導線を追加。
-- ZIP生成成功時の保存リンク・iPhone共有はv1.38.2と同じ。
-- 物理パラメータ、narrow-contact angular correction、安定判定条件、CSV項目・分割方式は変更なし。
+14件のAngular loopの多くは次の接触幅が8px未満で、現在のnarrow-contact thresholdとの相関が確認されました。ただし、これだけではnarrow-contact correctionが原因とは確定できません。
 
-このバージョンでは、原因が判明するまで物理側の変更は行わず、まずZIP生成処理のどの段階で失敗しているかを切り分けます。
+### v1.39.6 run1
 
+`narrowContactThresholdPx` を8pxから12pxへ変更した結果、短時間接触イベントと大きな角速度変化が減少しました。
 
-## v1.38.4 ZIP処理整理
-- v1.38.0〜v1.38.3で追加されたZIP生成診断・保存処理を整理。
-- 計測データ生成とZIP生成の境界を明確化し、ZIP生成は最終段階でのみ実行。
-- ZIP対象ファイルはピース別CSVを生成済みの配列から一度だけ組み立てる。
-- カスタムZIP生成処理を整理し、未使用の日時情報・重複処理を削除。
-- compact frames の不要な `POST_STABLE_FRAMES` 依存を削除。
-- 安定判定、物理パラメータ、接触診断、CSV項目の意味は変更なし。
-- ZIP生成失敗時の段階別診断テキスト出力は維持。
+v1.39.4 run1との比較:
+
+| 指標 | v1.39.4 | v1.39.6 |
+|---|---:|---:|
+| short contact events（4 substeps以下） | 34 | 25 |
+| 最大短時間event `|Δω| > 0.15` のピース数 | 19 | 10 |
+| 最大短時間event `|Δω| > 0.20` のピース数 | 13 | 8 |
+| 最大短時間event `|Δω| > 0.25` のピース数 | 6 | 3 |
+| contact loops | 38 | 27 |
+
+ただし、Piece 25など、12pxの閾値だけでは説明できないケースも残っています。
+
+---
+
+## 9. 「同じピースなのにrunごとに暴れる」問題
+
+現在の重要な調査対象です。
+
+同じ条件で計測しても、同じピースがrunによって大きく回転する場合と、ほとんど回転しない場合があります。
+
+Piece 25についてv1.39.4 run2 / run3を比較した結果、最初の接触substep付近で接触マニホールド自体が異なることが確認されています。
+
+一例:
+
+- run2のsubstep 238
+  - contact width: 約1px
+  - contact Part: 1
+  - support/contact geometryが非常に狭い
+- run3のsubstep 238
+  - contact width: 約16px
+  - contact Part: 3
+  - support: 約16px
+
+そのため、現時点では
+
+```text
+微小な事前状態の差
+    ↓
+衝突時の接触マニホールドの違い
+    ↓
+Matter.js Solverへの入力の違い
+    ↓
+角速度の違い
+    ↓
+再接触・回転のカスケード
+```
+
+という仮説が、単純に「Solverが同じ入力に対してランダムに違う結果を出している」という仮説より整合的です。
+
+ただし、v1.39.7では必要なsubstepデータを取得できなかったため、まだ確定ではありません。
+
+---
+
+## 10. v1.39.7の問題
+
+v1.39.7では `substeps.csv` を追加しましたが、実際のrun1ではヘッダーのみでデータ行が0件でした。
+
+一方、通常の計測は正常でした。
+
+- 37/37 `stable_confirmed`
+- 37/37 `row_count_ok`
+- 37/37 `landing_present`
+- timeout 0
+
+したがって、問題は通常の計測ではなく、substep診断の取得方法に限定されます。
+
+---
+
+## 11. v1.39.8の目的
+
+v1.39.8ではsubstep診断の取得方法を変更します。
+
+### v1.39.7
+
+```text
+measurement/substep.js
+    ↓
+Matter.Engine.update を外側からラップ
+    ↓
+各substepを取得しようとする
+```
+
+### v1.39.8
+
+```text
+Physics.step()
+    ↓
+Engine.update()
+    ↓
+既存のSolver処理
+    ↓
+既存のnarrow-contact correction
+    ↓
+substep diagnostic hook
+    ↓
+measurement/substep.js
+```
+
+つまり、実際の`Physics.step()`内で各substepが処理された直後に、診断用データだけを外へ渡します。
+
+### 取得するデータ
+
+最初の地面接触を基準に前後12substepを保存します。
+
+- position X/Y
+- angle
+- velocity X/Y
+- angular velocity
+- Solver直後の同値
+- correction後の同値
+- Solver角速度変化
+- correction角速度変化
+- ground pair数
+- contact数
+- support数
+- contact Part数
+- contact Part ID
+- contact width
+- contact center offset
+- collision normal
+- collision depth
+- collision separation
+
+このデータによって、特に最初の接触前後について
+
+```text
+substep 236
+substep 237
+substep 238
+substep 239
+```
+
+などをrun間で直接比較できるようにします。
+
+### 物理挙動への影響
+
+v1.39.8では、診断フックの追加以外に以下を変更しません。
+
+- gravity
+- friction
+- restitution
+- density
+- Solver iteration
+- substep数
+- sleep threshold
+- narrow-contact threshold
+- narrow-contact correction式
+- 接触判定式
+- 安定判定条件
+
+診断フック内部で例外が発生した場合も、物理計算を停止させず警告として処理します。
+
+---
+
+## 12. v1.39.8で確認したいこと
+
+最優先は、同じピースのrun間差が**接触前から存在するのか、接触検出時に初めて発生するのか**を切り分けることです。
+
+### A. 接触前から差がある場合
+
+```text
+236以前から x/y/angle/vx/vy/omega が異なる
+```
+
+場合は、フレーム時間・subDtなど、接触前の状態生成側を調べます。
+
+### B. 接触前まではほぼ同じ場合
+
+```text
+236～237までほぼ同じ
+238でcontact Part/support/widthが異なる
+```
+
+場合は、Matter.jsのnarrow-phase / compound-bodyの接触マニホールド生成を重点的に調べます。
+
+この切り分けができるまでは、Solverやfrictionなどの物理パラメータを追加で変更しません。
+
+---
+
+## 13. ZIP出力
+
+計測完了後、画面下部からZIPを保存できます。
+
+ファイル名:
+
+```text
+JinSanTowerGame_v1.39.8_runN_diagnostics.zip
+```
+
+iPhoneでは「ZIPを共有（iPhone）」も使用できます。
+
+既存のショートカットでGitHubへ保存する場合は、従来どおり
+
+```text
+log/v1.39.8/runN.zip
+```
+
+へ保存します。
+
+---
+
+## 14. 開発上の注意
+
+- 物理原因を調査中のため、診断バージョンでは物理パラメータを同時に変更しない。
+- 1バージョンにつき変更目的を限定する。
+- ピース数37をハードコードしない。
+- `docs/` の既存ログアップロード手順を再作成しない。
+- コード変更はパッチではなく完全差し替えファイルで管理する。
+- バージョン番号は `js/measurement/version.js` を唯一の定義元とする。
+- ZIP生成処理は既存の`measurement/export.js`を利用する。
+
