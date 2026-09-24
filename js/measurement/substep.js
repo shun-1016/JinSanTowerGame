@@ -1,4 +1,4 @@
-/* v1.39.8 - direct Physics.step substep diagnostic collector. Physics behavior is unchanged. */
+/* v1.39.9 - robust substep diagnostic start detection. Physics behavior is unchanged. */
 (() => {
   'use strict';
 
@@ -64,7 +64,25 @@
 
   function stop(){state.active=false;}
 
+  function watchMeasurementButton(){
+    const scan=()=>{
+      const button=document.getElementById('measurementButton');
+      if(!button)return;
+      if(button.disabled && !state.active) start();
+    };
+    scan();
+    const observer=new MutationObserver(()=>scan());
+    observer.observe(document.body,{subtree:true,childList:true,attributes:true,attributeFilter:['disabled']});
+  }
+
   function onSubstep(ctx){
+    // Measurement start is also detected from the actual disabled state of the
+    // measurement button. This is a fallback for DOM replacement/event-order
+    // differences in iOS Safari. It does not alter physics.
+    if(!state.active){
+      const button=document.getElementById('measurementButton');
+      if(button && button.disabled) start();
+    }
     if(!state.active)return;
     const row=makeRow(ctx);
     const hadContact=!!ctx.info;
@@ -103,6 +121,7 @@
       const target=event.target?.closest?.('#measurementButton');
       if(target)start();
     },{capture:true});
+    watchMeasurementButton();
   }
 
   function rows(){return state.rows.slice();}
